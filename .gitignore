@@ -23,3 +23,7 @@ stan/m01_forward
 
 # OS
 .DS_Store
+
+# Local env overrides (DATABASE_URL etc.)
+.env.local
+docker-compose.override.yml

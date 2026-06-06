@@ -186,70 +186,38 @@ def extract_theta_space_draws(fit: Any) -> dict[str, np.ndarray]:
     return out
 
 
-def assemble_fit_data(
-    input_dir: Path | None = None,
-    L: int | None = None,
-    H_forecast: int | None = None,
+def _build_stan_data_from_rows(
+    evidence_rows: list[dict[str, str]],
+    source_rows: list[dict[str, str]],
+    label_rows: list[dict[str, str]],
+    strata_rows: list[dict[str, str]],
+    L: int,
+    H_forecast: int,
 ) -> dict[str, Any]:
-    """Construct the Stan data dict from adjudicated CSV files.
+    """Build the Stan data dict from pre-loaded row dicts.
 
-    Expected files in input_dir (default: data/adjudicated/):
-      evidence_items.csv  — columns: evidence_id, stratum_g, source_id, evidence_date
-      sources.csv         — columns: source_id (unique per source family / block)
-      coder_labels.csv    — columns: evidence_id, coder_id, label, tactic_k
-      strata.csv          — columns: stratum_g, I_O (observability score 0-1)
-
-    L defaults to 3 (pre-registered candidate); override once F21 gate selects L.
-    H_forecast defaults to FORECAST_HORIZONS_MONTHS[0] (first horizon).
-
-    Raises FileNotFoundError if any required CSV is missing.
+    Shared by both the Postgres and CSV paths of assemble_fit_data().
+    All row dicts use string values; numeric conversion is done here.
     """
-    import csv as csv_mod
+    from collections import defaultdict
 
-    input_dir = input_dir or ADJUDICATED_DIR
-    L = L or 3
-    H_forecast = H_forecast or FORECAST_HORIZONS_MONTHS[0]
-
-    required = ["evidence_items.csv", "sources.csv", "coder_labels.csv", "strata.csv"]
-    for fname in required:
-        p = input_dir / fname
-        if not p.exists():
-            raise FileNotFoundError(
-                f"Real-data fit requires {fname} in {input_dir}. "
-                "Populate data/adjudicated/ before running `david fit`."
-            )
-
-    def _read_csv(fname: str) -> list[dict[str, str]]:
-        with (input_dir / fname).open(newline="") as fh:
-            return [{k: (v or "").strip() for k, v in row.items()}
-                    for row in csv_mod.DictReader(fh)]
-
-    evidence_rows = _read_csv("evidence_items.csv")
-    source_rows = _read_csv("sources.csv")
-    label_rows = _read_csv("coder_labels.csv")
-    strata_rows = _read_csv("strata.csv")
-
-    # Build index maps (1-based)
     def _index_map(values: list[str]) -> dict[str, int]:
         return {v: i for i, v in enumerate(sorted(set(values)), start=1)}
 
     stratum_to_series = _index_map([r["stratum_g"] for r in strata_rows])
-    tactic_to_index = _index_map([r["tactic_k"] for r in label_rows if r.get("tactic_k")])
-    source_to_index = _index_map([r["source_id"] for r in source_rows])
-    coder_to_index = _index_map([r["coder_id"] for r in label_rows if r.get("coder_id")])
-    stratum_obs = {r["stratum_g"]: float(r.get("I_O") or 0.0) for r in strata_rows}
+    tactic_to_index   = _index_map([r["tactic_k"]  for r in label_rows   if r.get("tactic_k")])
+    source_to_index   = _index_map([r["source_id"]  for r in source_rows])
+    coder_to_index    = _index_map([r["coder_id"]   for r in label_rows   if r.get("coder_id")])
+    stratum_obs       = {r["stratum_g"]: float(r.get("I_O") or 0.0) for r in strata_rows}
 
-    # Assign time index: month-offset within each stratum, sorted by evidence_date
-    from collections import defaultdict
+    # Time index: 1-based consecutive month offset within each stratum
     by_stratum: dict[str, list[dict]] = defaultdict(list)
     for row in evidence_rows:
         by_stratum[row["stratum_g"]].append(row)
     for rows in by_stratum.values():
         rows.sort(key=lambda r: r.get("evidence_date", ""))
-    # Build time index within stratum (month: 1-based consecutive)
     evidence_time: dict[str, int] = {}
     for rows in by_stratum.values():
-        # Group by date, assign consecutive month index
         seen_dates: dict[str, int] = {}
         t = 0
         for row in rows:
@@ -259,38 +227,45 @@ def assemble_fit_data(
                 seen_dates[d] = t
             evidence_time[row["evidence_id"]] = seen_dates[d]
 
-    # Tactic per evidence (from coder_labels)
+    # Primary tactic per evidence item (from coder_labels)
     evidence_tactic: dict[str, str] = {}
     for row in label_rows:
         eid = row["evidence_id"]
-        tk = row.get("tactic_k", "")
-        if tk and eid not in evidence_tactic:
-            evidence_tactic[eid] = tk
+        if row.get("tactic_k") and eid not in evidence_tactic:
+            evidence_tactic[eid] = row["tactic_k"]
 
     # Units: one per (stratum, time, tactic) combination — 1-indexed
     unit_key_to_idx: dict[tuple, int] = {}
-    unit_series: list[int] = []
-    unit_time_list: list[int] = []
-    unit_tactic: list[int] = []
-    selected_flat: list[int] = []
+    unit_series:      list[int]   = []
+    unit_time_list:   list[int]   = []
+    unit_tactic:      list[int]   = []
+    selected_flat:    list[int]   = []
     observability_flat: list[float] = []
 
     sorted_evidence = sorted(
         evidence_rows,
-        key=lambda r: (stratum_to_series[r["stratum_g"]], evidence_time.get(r["evidence_id"], 1), r["evidence_id"]),
+        key=lambda r: (
+            stratum_to_series[r["stratum_g"]],
+            evidence_time.get(r["evidence_id"], 1),
+            r["evidence_id"],
+        ),
     )
     evidence_to_unit: dict[str, int] = {}
     for row in sorted_evidence:
-        sg = row["stratum_g"]
+        sg  = row["stratum_g"]
         eid = row["evidence_id"]
-        tk = evidence_tactic.get(eid, "unknown")
-        key = (stratum_to_series[sg], evidence_time.get(eid, 1), tactic_to_index.get(tk, 1))
+        tk  = evidence_tactic.get(eid, "unknown")
+        key = (
+            stratum_to_series[sg],
+            evidence_time.get(eid, 1),
+            tactic_to_index.get(tk, 1),
+        )
         if key not in unit_key_to_idx:
             unit_key_to_idx[key] = len(unit_key_to_idx) + 1
             unit_series.append(key[0])
             unit_time_list.append(key[1])
             unit_tactic.append(key[2])
-            selected_flat.append(1)   # observed-selected only (pilot assumption)
+            selected_flat.append(1)   # all adjudicated evidence is selected
             observability_flat.append(stratum_obs.get(sg, 0.0))
         evidence_to_unit[eid] = unit_key_to_idx[key]
 
@@ -301,12 +276,14 @@ def assemble_fit_data(
     R = len(stratum_to_series)
     T = max(unit_time_list) if unit_time_list else 1
 
-    # Labels
-    label_unit: list[int] = []
+    label_unit:   list[int] = []
     label_source: list[int] = []
-    label_coder: list[int] = []
-    y_vals: list[int] = []
-    for row in sorted(label_rows, key=lambda r: (evidence_to_unit.get(r["evidence_id"], 0), r.get("coder_id", ""))):
+    label_coder:  list[int] = []
+    y_vals:       list[int] = []
+    for row in sorted(
+        label_rows,
+        key=lambda r: (evidence_to_unit.get(r["evidence_id"], 0), r.get("coder_id", "")),
+    ):
         eid = row.get("evidence_id", "")
         if eid not in evidence_to_unit:
             continue
@@ -318,26 +295,87 @@ def assemble_fit_data(
         label_coder.append(cid)
         y_vals.append(lbl)
 
-    # Pre-sorted label slices for the Stan sorted-index optimization
     label_start, label_len = _build_label_index(label_unit, label_source, U, S)
 
     return {
         "R": R, "T": T, "L": L, "K": K, "S": S, "M": M, "U": U,
-        "unit_series": unit_series,
-        "unit_time": unit_time_list,
-        "unit_tactic": unit_tactic,
-        "selected": selected_flat,
-        "observability": observability_flat,
-        "N_label": len(y_vals),
-        "label_unit": label_unit,
-        "label_source": label_source,
-        "label_coder": label_coder,
-        "y": y_vals,
-        "label_start": label_start,
-        "label_len": label_len,
-        "delta_max": 0.30,
-        "H_forecast": max(1, H_forecast),
+        "unit_series":     unit_series,
+        "unit_time":       unit_time_list,
+        "unit_tactic":     unit_tactic,
+        "selected":        selected_flat,
+        "observability":   observability_flat,
+        "N_label":         len(y_vals),
+        "label_unit":      label_unit,
+        "label_source":    label_source,
+        "label_coder":     label_coder,
+        "y":               y_vals,
+        "label_start":     label_start,
+        "label_len":       label_len,
+        "delta_max":       0.30,
+        "H_forecast":      max(1, H_forecast),
     }
+
+
+def assemble_fit_data(
+    input_dir: Path | None = None,
+    L: int | None = None,
+    H_forecast: int | None = None,
+) -> dict[str, Any]:
+    """Construct the Stan data dict from adjudicated data.
+
+    Source priority:
+      1. Postgres (DATABASE_URL) — used when the database is reachable and
+         contains adjudicated evidence (evidence_items.adjudicated = TRUE).
+      2. CSV fallback — reads four files from input_dir (data/adjudicated/):
+           evidence_items.csv, sources.csv, coder_labels.csv, strata.csv
+
+    Raises FileNotFoundError when both sources are unavailable.
+
+    L defaults to 3 (pre-registered candidate).
+    H_forecast defaults to FORECAST_HORIZONS_MONTHS[0].
+    """
+    import csv as csv_mod
+
+    L = L or 3
+    H_forecast = H_forecast or FORECAST_HORIZONS_MONTHS[0]
+
+    # ── 1. Try Postgres ───────────────────────────────────────────────────────
+    _db_error: str = ""
+    try:
+        from ..db.repositories import get_adjudicated_data
+        rows = get_adjudicated_data()
+        return _build_stan_data_from_rows(
+            rows["evidence_rows"], rows["source_rows"],
+            rows["label_rows"],   rows["strata_rows"],
+            L, H_forecast,
+        )
+    except Exception as exc:
+        _db_error = str(exc)
+
+    # ── 2. CSV fallback ───────────────────────────────────────────────────────
+    input_dir = input_dir or ADJUDICATED_DIR
+    required  = ["evidence_items.csv", "sources.csv", "coder_labels.csv", "strata.csv"]
+    missing   = [f for f in required if not (input_dir / f).exists()]
+    if missing:
+        raise FileNotFoundError(
+            f"Postgres unavailable ({_db_error}) and CSV fallback incomplete — "
+            f"missing: {missing} in {input_dir}.\n"
+            "To use Postgres: docker compose up -d && david db init\n"
+            "To use CSVs: populate data/adjudicated/ with the four required files."
+        )
+
+    def _read_csv(fname: str) -> list[dict[str, str]]:
+        with (input_dir / fname).open(newline="") as fh:
+            return [{k: (v or "").strip() for k, v in row.items()}
+                    for row in csv_mod.DictReader(fh)]
+
+    return _build_stan_data_from_rows(
+        _read_csv("evidence_items.csv"),
+        _read_csv("sources.csv"),
+        _read_csv("coder_labels.csv"),
+        _read_csv("strata.csv"),
+        L, H_forecast,
+    )
 
 
 def _sigmoid(x: np.ndarray) -> np.ndarray:
@@ -616,5 +654,16 @@ def run_fit(run_id: str | None = None) -> dict[str, Any]:
 
     (fit_dir / "fit_summary.json").write_text(json.dumps(fit_summary, indent=2))
     fit.draws_pd().to_parquet(fit_dir / "draws.parquet")
+
+    # Persist to Postgres (non-fatal: JSON + parquet are the source of truth)
+    try:
+        from ..db.repositories import write_fit_run
+        write_fit_run({
+            **fit_summary,
+            "n_strata": data.get("R"),
+            "n_labels": data.get("N_label"),
+        })
+    except Exception:
+        pass  # DB write failure must not fail the fit
 
     return {**fit_summary, "fit_dir": str(fit_dir)}

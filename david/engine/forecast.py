@@ -237,6 +237,13 @@ def emit_forecasts(
     cells_path = out_dir / f"cells_h{horizon_months:02d}.json"
     cells_path.write_text(json.dumps(cells_records, indent=2))
 
+    # Persist to Postgres (non-fatal: JSON file is the source of truth)
+    try:
+        from ..db.repositories import write_forecast_cells
+        write_forecast_cells(cells_records, run_id)
+    except Exception:
+        pass
+
     return {
         "gate_status": "pass",
         "n_cells": len(cells_records),

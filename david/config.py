@@ -60,3 +60,9 @@ FORECAST_HORIZONS_MONTHS = (3, 6, 9, 12)
 
 # Model version (bump on Stan or theorem change)
 MODEL_VERSION = "m01_forward_v0.1.0"
+
+# Database
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql://david:david@localhost:5432/david",
+)

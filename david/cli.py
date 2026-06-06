@@ -31,6 +31,8 @@ app = typer.Typer(
     no_args_is_help=True,
     help="DAVID/M0.1 canonical CLI. See docs/ARCHITECTURE.md.",
 )
+db_app = typer.Typer(no_args_is_help=True, help="Postgres database commands.")
+app.add_typer(db_app, name="db")
 console = Console()
 
 
@@ -132,6 +134,75 @@ def replay(
     """Reproduce a past run end-to-end from recorded versions."""
     result = orchestrator.replay(run_id=run_id)
     console.print(f"[green]replay complete[/]: {result['status']}")
+
+
+@db_app.command("init")
+def db_init() -> None:
+    """Create (or re-create) all Postgres tables and indexes.
+
+    Idempotent — safe to run multiple times. Requires Postgres to be running:
+
+        docker compose up -d
+        david db init
+    """
+    from .db.connection import ping
+    from .db.schema import create_all
+    from .config import DATABASE_URL
+
+    if not ping():
+        console.print(
+            f"[red]Cannot reach Postgres[/] at [bold]{DATABASE_URL}[/]\n"
+            "Start it with:  [bold]docker compose up -d[/]"
+        )
+        raise typer.Exit(code=1)
+    create_all()
+    console.print(f"[green]Schema created[/] at [bold]{DATABASE_URL}[/]")
+
+
+@db_app.command("status")
+def db_status() -> None:
+    """Show Postgres connectivity and row counts per table."""
+    from .db.connection import ping
+    from .db.schema import table_row_counts
+    from .db.repositories import get_fit_runs
+    from .config import DATABASE_URL
+
+    if not ping():
+        console.print(
+            f"[red]Postgres unreachable[/] — {DATABASE_URL}\n"
+            "Run:  [bold]docker compose up -d[/]"
+        )
+        raise typer.Exit(code=1)
+
+    console.print(f"[green]Connected[/] → [bold]{DATABASE_URL}[/]\n")
+
+    try:
+        counts = table_row_counts()
+        console.print("[bold]Table row counts:[/]")
+        for table, n in counts.items():
+            colour = "green" if n > 0 else "yellow"
+            console.print(f"  [{colour}]{table:<20}[/] {n:>8,}")
+    except Exception as exc:
+        console.print(f"[yellow]Schema not yet initialised[/] ({exc})\nRun: [bold]david db init[/]")
+        return
+
+    console.print()
+    try:
+        runs = get_fit_runs(limit=5)
+        if runs:
+            console.print("[bold]Recent fit runs:[/]")
+            for r in runs:
+                status_colour = "green" if r["gate_status"] == "pass" else "red"
+                console.print(
+                    f"  [{status_colour}]{r['gate_status']:<6}[/]  "
+                    f"{r['run_id']}  "
+                    f"R̂≤{r['rhat_max']:.3f}  "
+                    f"started {str(r['started_at'])[:16]}"
+                )
+        else:
+            console.print("[yellow]No fit runs yet.[/]  Run: [bold]david fit[/]")
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
