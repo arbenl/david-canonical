@@ -119,16 +119,66 @@ class AnthropicBackend:
         return 0
 
 
+# ─── Groq backend ────────────────────────────────────────────────────────────
+
+class GroqBackend:
+    """Groq backend for binary (0/1) evidence coding — free tier, OpenAI-compatible.
+
+    Reads GROQ_API_KEY from the environment.  Uses llama-3.3-70b-versatile by
+    default (set via cfg.model in llm_pool.json).
+    """
+
+    _SYSTEM = (
+        "You are a political-events coder. "
+        "For each piece of text, respond with exactly 0 or 1 — "
+        "1 if the text contains evidence of the stated tactic, 0 if not. "
+        "Respond with a single digit only."
+    )
+
+    def __init__(self, cfg: LlmCoderConfig) -> None:
+        api_key = os.environ.get("GROQ_API_KEY", "")
+        if not api_key:
+            raise RuntimeError(
+                "GROQ_API_KEY not set. "
+                "Export it before running the coder: export GROQ_API_KEY=gsk_..."
+            )
+        from groq import Groq  # imported lazily so Groq package is optional
+        self._client = Groq(api_key=api_key)
+        self._cfg = cfg
+        self._template = AnthropicBackend._load_template(cfg.prompt_template_id)
+
+    def code_item(self, text: str, tactic_class: str) -> int:
+        """Return 1 if `text` contains evidence of `tactic_class`, else 0."""
+        user_msg = self._template.format(
+            tactic_class=tactic_class,
+            text=text[:4000],
+        )
+        response = self._client.chat.completions.create(
+            model=self._cfg.model,
+            max_tokens=4,
+            temperature=self._cfg.temperature,
+            messages=[
+                {"role": "system", "content": self._SYSTEM},
+                {"role": "user", "content": user_msg},
+            ],
+        )
+        raw = response.choices[0].message.content.strip()
+        if raw.startswith("1") or raw.lower().startswith("yes"):
+            return 1
+        return 0
+
+
 def get_backend(cfg: LlmCoderConfig) -> LlmBackend:
     """Resolve the backend from cfg.provider.
 
-    Currently supported providers: 'anthropic'.
-    To add a new provider (OpenAI, Vertex, etc.):
+    Supported providers: 'anthropic', 'groq'.
+    To add a new provider (Vertex, Together, etc.):
         1. Implement a class with code_item(text, tactic_class) -> int
         2. Add the provider key below.
     """
     _PROVIDER_DISPATCH = {
         "anthropic": AnthropicBackend,
+        "groq": GroqBackend,
     }
     cls = _PROVIDER_DISPATCH.get(cfg.provider.lower())
     if cls is None:
