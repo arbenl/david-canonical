@@ -1,8 +1,0 @@
-[phases.setup]
-nixPkgs = ["python311", "gcc"]
-
-[phases.install]
-cmds = ["pip install uv", "uv sync --extra llm"]
-
-[start]
-cmd = "uvicorn david.api.server:api --host 0.0.0.0 --port $PORT"
