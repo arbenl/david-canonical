@@ -17,8 +17,8 @@ from . import config
 from .engine import orchestrator
 from .engine.forecast import emit_forecasts
 from .engine.router import apply_forecast_routing
-from .ingest.adjudicator_queue import build_queue
-from .ingest.llm_coder import calibrate_coders
+from .ingest.adjudicator_queue import auto_adjudicate, build_queue
+from .ingest.llm_coder import calibrate_coders, code_evidence, load_llm_pool
 from .ingest.normalize import normalize_raw
 from .ingest.sources import run_scrapers
 from .model.fit import run_fit
@@ -40,14 +40,81 @@ console = Console()
 def ingest(
     since: str = typer.Option(None, help="ISO date; default = last cycle"),
     until: str = typer.Option(None, help="ISO date; default = today"),
+    skip_coding: bool = typer.Option(False, "--skip-coding", help="Skip LLM coding step"),
 ) -> None:
-    """Run scrapers, normalize, dispatch LLM coders, refresh adjudicator queue."""
+    """Full automated ingest cycle — zero human input required unless queue > 0.
+
+    Pipeline:
+      1. Scrape RSS/API sources → raw JSON-L + Postgres evidence_items
+      2. Normalize → canonical schema + Postgres upsert
+      3. LLM coding → Postgres coder_labels  (skip with --skip-coding)
+      4. Auto-adjudicate → unanimous items flagged adjudicated=TRUE automatically
+         Disagreement > threshold → adjudicator_queue.json for human review
+    """
+    from .config import TACTIC_CLASSES
+
     since_d = date.fromisoformat(since) if since else None
     until_d = date.fromisoformat(until) if until else date.today()
+
+    # ── Step 1+2: scrape + normalize → DB ──────────────────────────────────
+    console.print("[bold]Step 1/4[/] Scraping sources…")
     raw_paths = run_scrapers(since=since_d, until=until_d)
+    console.print(f"  {len(raw_paths)} source file(s) fetched")
+
+    console.print("[bold]Step 2/4[/] Normalizing → Postgres…")
     normalized = normalize_raw(raw_paths)
-    queue = build_queue(normalized)
-    console.print(f"[green]ingest complete[/]: {len(normalized)} items, {len(queue)} queued")
+    console.print(f"  {len(normalized)} item(s) normalized and upserted")
+
+    # ── Step 3: LLM coding → Postgres coder_labels ─────────────────────────
+    if skip_coding:
+        console.print("[yellow]Step 3/4[/] LLM coding skipped (--skip-coding)")
+        coded: list = []
+    else:
+        llm_pool = load_llm_pool()
+        if not llm_pool:
+            console.print(
+                "[yellow]Step 3/4[/] No LLM coders configured. "
+                "Add entries to [bold]config/llm_pool.json[/] to enable automatic coding.\n"
+                "  Template: {\"coder_id\": \"anthropic_claude_haiku_seed_001\", "
+                "\"provider\": \"anthropic\", \"model\": \"claude-3-5-haiku-20241022\", "
+                "\"prompt_template_id\": \"default\", \"seed\": 1, \"temperature\": 0.0}"
+            )
+            coded = []
+        else:
+            console.print(
+                f"[bold]Step 3/4[/] Coding {len(normalized)} item(s) "
+                f"× {len(llm_pool)} coder(s) × {len(TACTIC_CLASSES)} tactic(s)…"
+            )
+            coded = code_evidence(normalized, llm_pool, list(TACTIC_CLASSES))
+            console.print(f"  {len(coded)} label(s) written to coder_labels")
+
+    # ── Step 4: auto-adjudication ───────────────────────────────────────────
+    console.print("[bold]Step 4/4[/] Auto-adjudicating…")
+    adj = auto_adjudicate()
+
+    if adj["gate_status"] != "pass":
+        console.print(f"[red]Auto-adjudication failed[/]: {adj.get('reason')} — {adj.get('detail')}")
+        console.print("[yellow]Continuing — adjudicator queue may be stale[/]")
+    else:
+        n_auto  = adj["auto_adjudicated"]
+        n_queue = adj["queued_for_human"]
+        console.print(
+            f"  [green]{n_auto}[/] item(s) auto-adjudicated (unanimous coders)\n"
+            f"  [yellow]{n_queue}[/] item(s) queued for human review → {adj['queue_path']}"
+        )
+        if n_queue > 0:
+            console.print(
+                f"\n[bold yellow]Human review needed:[/] open [bold]{adj['queue_path']}[/] "
+                "and mark adjudicated items in Postgres with:\n"
+                "  [bold]UPDATE evidence_items SET adjudicated=TRUE WHERE evidence_id='...'[/]"
+            )
+
+    console.print(
+        f"\n[green]Ingest complete[/] — "
+        f"{len(normalized)} scraped, {len(coded)} labels, "
+        f"{adj.get('auto_adjudicated', 0)} auto-adjudicated, "
+        f"{adj.get('queued_for_human', 0)} queued"
+    )
 
 
 @app.command("calibrate-coders")

@@ -52,8 +52,23 @@ MIN_POSTERIOR_DRAWS = 4000
 
 # Human-loop budget
 ADJUDICATOR_HOURS_PER_CYCLE = 4.0
+# Minority-share threshold for escalation to human.
+# minority_share = min(ones, zeros) / n_coders
+# 0.0 = all coders agree (auto-adjudicated); 0.5 = perfect split.
+# Items with minority_share > ADJUDICATOR_DISAGREEMENT_THRESHOLD go to queue.
 ADJUDICATOR_DISAGREEMENT_THRESHOLD = 0.30
 GOLD_STANDARD_SAMPLE_RATE = 0.05
+
+# Pre-registered tactic classes (must match K in m01_forward.stan).
+# Bump MODEL_VERSION if you add or remove tactics.
+TACTIC_CLASSES: tuple[str, ...] = (
+    "SIO",   # State institution obstruction
+    "MIO",   # Media/information obstruction
+    "CSIO",  # Civil-society institution obstruction
+)
+
+# LLM pool config file (list of LlmCoderConfig dicts)
+LLM_POOL_REGISTRY = CONFIG_ROOT / "llm_pool.json"
 
 # Forecast horizons (months) emitted by `david forecast`
 FORECAST_HORIZONS_MONTHS = (3, 6, 9, 12)

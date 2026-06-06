@@ -35,7 +35,9 @@ from typing import Protocol
 
 import numpy as np
 
-from ..config import CODED_DIR, CODER_CALIBRATION_STAN, CONFIG_ROOT, GOLD_DIR
+from ..config import (
+    CODED_DIR, CODER_CALIBRATION_STAN, CONFIG_ROOT, GOLD_DIR, LLM_POOL_REGISTRY,
+)
 
 # ─── config types ────────────────────────────────────────────────────────────
 
@@ -141,10 +143,39 @@ def get_backend(cfg: LlmCoderConfig) -> LlmBackend:
 
 # ─── coding routine ──────────────────────────────────────────────────────────
 
-def code_evidence(items, llm_pool: list[LlmCoderConfig], tactic_classes: list[str]) -> list[dict]:
+def load_llm_pool() -> list[LlmCoderConfig]:
+    """Load the LLM coder pool from config/llm_pool.json.
+
+    Returns an empty list if the file doesn't exist (no LLM coders configured).
+    Example llm_pool.json:
+    [
+      {
+        "coder_id": "anthropic_claude_haiku_seed_001",
+        "provider": "anthropic",
+        "model": "claude-3-5-haiku-20241022",
+        "prompt_template_id": "default",
+        "seed": 1,
+        "temperature": 0.0
+      }
+    ]
+    """
+    if not LLM_POOL_REGISTRY.exists():
+        return []
+    raw = json.loads(LLM_POOL_REGISTRY.read_text())
+    return [LlmCoderConfig(**c) for c in raw]
+
+
+def code_evidence(
+    items,
+    llm_pool: list[LlmCoderConfig],
+    tactic_classes: list[str],
+) -> list[dict]:
     """Run each item through each LLM coder for each tactic class.
 
-    Output schema:
+    Writes coded labels to JSON-L (durable) and upserts each label to
+    coder_labels in Postgres (non-fatal — JSON-L is the fallback).
+
+    Output schema per record:
         {
             "evidence_id": "...",
             "coder_id": "...",
@@ -156,8 +187,9 @@ def code_evidence(items, llm_pool: list[LlmCoderConfig], tactic_classes: list[st
     """
     out_path = CODED_DIR / f"coded_{datetime.utcnow().date().isoformat()}.jsonl"
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    records = []
-    with out_path.open("w") as f:
+    records: list[dict] = []
+
+    with out_path.open("a") as f:   # append so multiple runs accumulate
         for cfg in llm_pool:
             backend = get_backend(cfg)
             for item in items:
@@ -173,6 +205,19 @@ def code_evidence(items, llm_pool: list[LlmCoderConfig], tactic_classes: list[st
                     }
                     records.append(rec)
                     f.write(json.dumps(rec) + "\n")
+
+                    # Upsert to Postgres (non-fatal)
+                    try:
+                        from ..db.repositories import upsert_coder_label
+                        upsert_coder_label(
+                            evidence_id=item.evidence_id,
+                            coder_id=cfg.coder_id,
+                            tactic_k=k,
+                            label=Y,
+                        )
+                    except Exception:
+                        pass  # JSON-L is the durable record
+
     return records
 
 

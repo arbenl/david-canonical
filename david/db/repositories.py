@@ -272,6 +272,41 @@ def write_fit_run(fit_summary: dict[str, Any]) -> None:
             ))
 
 
+def mark_adjudicated(evidence_ids: list[str]) -> int:
+    """Set adjudicated=TRUE for a batch of evidence_ids. Returns row count updated."""
+    if not evidence_ids:
+        return 0
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE evidence_items
+                SET    adjudicated = TRUE
+                WHERE  evidence_id = ANY(%s)
+                  AND  adjudicated = FALSE
+            """, (evidence_ids,))
+            return cur.rowcount
+
+
+def get_unreviewed_labels() -> list[dict]:
+    """Return coder labels for evidence items not yet adjudicated.
+
+    Returns list of {evidence_id, tactic_k, coder_id, label} rows.
+    Used by auto_adjudicate() to decide which items can be auto-resolved.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT cl.evidence_id, cl.tactic_k, cl.coder_id, cl.label,
+                       ei.stratum_id
+                FROM   coder_labels cl
+                JOIN   evidence_items ei USING (evidence_id)
+                WHERE  ei.adjudicated = FALSE
+                ORDER  BY cl.evidence_id, cl.tactic_k, cl.coder_id
+            """)
+            cols = [d[0] for d in cur.description]
+            return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
 def write_forecast_cells(
     cells: list[dict[str, Any]],
     run_id: str,
