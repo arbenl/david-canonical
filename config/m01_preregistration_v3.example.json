@@ -1,0 +1,58 @@
+{
+  "version": "v3.0.0-canonical",
+  "supersedes": "m01_preregistration_v2.json (council_m01)",
+  "scope": "Bayesian Hidden Semi-Markov measurement + 6-12 month forecast of country-level tobacco-industry interference tactic activity, under partial observability, with fail-closed routing.",
+  "country_coverage_pilot": ["AL", "MK", "RS", "BA", "ME", "XK"],
+  "policy_coverage_pilot": ["taxation", "smoke_free", "marketing", "packaging"],
+  "tactic_classes": [
+    "T1_information_management",
+    "T2_reputation_management",
+    "T3_coalition_activation",
+    "T4_direct_lobbying",
+    "T5_economic_loss_framing",
+    "T6_legal_threat",
+    "T7_regulatory_delay",
+    "T8_regulatory_weakening",
+    "T9_post_policy_adaptation",
+    "T10_illicit_trade_framing",
+    "T11_digital_amplification",
+    "T12_institutional_capture",
+    "T13_research_suppression"
+  ],
+  "regimes_candidate_set": [3, 4, 5, 6, 7, 8],
+  "horizons_months": [3, 6, 9, 12],
+  "theorem_floors": {
+    "ID_DISTANCE_FLOOR": 0.05,
+    "INFORMATIVENESS_FLOOR_LOWER_95": 0.10,
+    "POSTERIOR_FDP_DEFAULT_Q": 0.10,
+    "HORIZON_PRIOR_DRIFT_TAU": 0.50,
+    "LAMBDA_ENDOG_INTERVAL_MAX_WIDTH": 0.20
+  },
+  "sbc_thresholds": {
+    "KS_ALPHA": 0.05,
+    "FORECAST_COVERAGE_80_BAND": [0.75, 0.85],
+    "FORECAST_COVERAGE_95_BAND": [0.90, 0.98]
+  },
+  "fit_contract": {
+    "R_HAT_MAX": 1.05,
+    "BULK_ESS_MIN": 400,
+    "TAIL_ESS_MIN": 400,
+    "DIVERGENCES_ALLOWED": 0,
+    "MIN_CHAINS": 4,
+    "MIN_POSTERIOR_DRAWS": 4000
+  },
+  "human_loop_budget": {
+    "ADJUDICATOR_HOURS_PER_CYCLE": 4.0,
+    "DISAGREEMENT_THRESHOLD": 0.30,
+    "GOLD_STANDARD_SAMPLE_RATE": 0.05
+  },
+  "falsification_battery": ["F1", "F3", "F4", "F5", "F6",
+                              "F7", "F8", "F9", "F10", "F11", "F12",
+                              "F13", "F14", "F15"],
+  "claim_firewall": {
+    "legal_claims": "disabled",
+    "policy_culpability_claims": "disabled",
+    "causal_claims": "disabled",
+    "headline_claims_require_route": "headline"
+  }
+}

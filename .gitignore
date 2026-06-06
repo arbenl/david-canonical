@@ -1,0 +1,25 @@
+# Data is append-only and large; never commit
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env
+
+# cmdstan build artifacts
+*.exe
+*.hpp
+*.o
+stan/m01_forward
+
+# pytest cache
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
