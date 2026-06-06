@@ -1,6 +1,11 @@
 /** Typed API client — fetches from FastAPI via Next.js rewrite /api/* */
 
-const BASE = "/api";
+// Server components: call Railway directly (rewrites are browser-only).
+// Browser / client components: use the /api rewrite to stay same-origin.
+const BASE =
+  typeof window === "undefined"
+    ? (process.env.DAVID_API_URL ?? "http://localhost:8080")
+    : "/api";
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { next: { revalidate: 30 } });
