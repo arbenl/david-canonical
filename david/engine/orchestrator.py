@@ -6,10 +6,12 @@ orchestrator.replay() for the CLI.
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from pathlib import Path
 from typing import Any
 
+from ..config import FITS_DIR, FORECASTS_DIR, FORECAST_HORIZONS_MONTHS
 from ..ingest.adjudicator_queue import build_queue
 from ..ingest.llm_coder import calibrate_coders
 from ..ingest.normalize import normalize_raw
@@ -17,8 +19,9 @@ from ..ingest.sources import run_scrapers
 from ..model.fit import run_fit
 from ..simulator.forecast_sbc import run_forecast_sbc
 from ..simulator.sbc import run_sbc
-from ..validation.falsification import run_falsification
-from .forecast import emit_forecasts
+from ..validation.falsification import run_falsification, _assemble_inputs
+from ..simulator.adversarial_battery import run_battery
+from .forecast import emit_forecasts, emit_all_horizons
 from .router import apply_forecast_routing
 
 
@@ -49,9 +52,7 @@ def run_all(since: date | None = None) -> dict[str, Any]:
     if falsify_result["gate_status"] != "pass":
         return {"status": "fail_at_falsification", "detail": falsify_result}
 
-    forecasts = []
-    for h in (6, 12):
-        forecasts.append(emit_forecasts(horizon_months=h))
+    forecasts = emit_all_horizons()
 
     routing = apply_forecast_routing()
     return {
@@ -67,10 +68,44 @@ def run_all(since: date | None = None) -> dict[str, Any]:
 def replay(run_id: str) -> dict[str, Any]:
     """Reproduce a recorded run from artifacts.
 
-    TODO: read recorded versions (model SHA, code SHA, data cutoff) and rerun
-    the pipeline with the same dependencies pinned.
+    Reads fit_summary.json to verify the run exists, re-emits forecast cells
+    for all horizons from the existing draws.parquet, then re-runs the
+    falsification battery against those artifacts.
+
+    This does NOT re-run the fit (which requires the original data cutoff and
+    the same CmdStan binary); it only replays the post-fit stages. For a full
+    reproducibility audit the caller should verify model_version matches the
+    current code before invoking replay().
     """
-    raise NotImplementedError(
-        "Replay must read run_id artifacts, restore evidence cutoff, "
-        "and rerun pipeline with pinned model_version and code_version."
-    )
+    fit_dir = FITS_DIR / run_id
+    if not fit_dir.exists():
+        return {
+            "gate_status": "fail",
+            "reason": f"run_id '{run_id}' not found in {FITS_DIR}",
+        }
+    summary_path = fit_dir / "fit_summary.json"
+    if not summary_path.exists():
+        return {
+            "gate_status": "fail",
+            "reason": f"fit_summary.json missing in {fit_dir}",
+        }
+    fit_summary = json.loads(summary_path.read_text())
+
+    # Re-emit forecast cells for all horizons from existing draws
+    forecast_out = FORECASTS_DIR / run_id
+    forecasts = emit_all_horizons(out_dir=forecast_out, fit_dir=fit_dir)
+
+    # Re-run falsification battery against the (now re-emitted) artifacts
+    forecast_dir = forecast_out if forecast_out.exists() else None
+    falsify_inputs = _assemble_inputs(fit_dir, forecast_dir)
+    battery_result = run_battery(inputs=falsify_inputs)
+
+    return {
+        "gate_status": battery_result["gate_status"],
+        "run_id": run_id,
+        "model_version": fit_summary.get("model_version"),
+        "original_timestamp": fit_summary.get("timestamp"),
+        "original_gate_status": fit_summary.get("gate_status"),
+        "forecasts": forecasts,
+        "falsification": battery_result,
+    }

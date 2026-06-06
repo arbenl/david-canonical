@@ -1,134 +1,245 @@
 """Forecast emission with horizon-validity gating (Theorem D-forecast).
 
-emit_forecasts(horizon_months, cell_filter) takes the latest fit and writes
-the canonical per-cell forecast object documented in ARCHITECTURE.md §7.1.
+emit_forecasts(horizon_months) takes the latest fit and writes the canonical
+per-cell forecast object documented in ARCHITECTURE.md §7.1.
 
-The horizon-validity gate (FG5) is checked here, not in the router, because
-above h* we substitute the marginal regime prediction for the conditional one.
+The horizon-validity gate uses the h_star pre-computed in run_fit (via
+theorem D') rather than recomputing it here. Cells with horizon_months > h_star
+are flagged horizon_prior_dominated in the output record.
+
+Flow:
+  1. load_posterior(fit_dir) → {column: (D,) array} from draws.parquet
+  2. Parse a_future[r,h,k] columns for the requested horizon
+  3. For each (r, k) cell: compute median, 80/95 CIs, horizon-validity flag
+  4. Write cells_h{horizon:02d}.json
+
+When draws.parquet is absent or a_future columns are not present (e.g. fit
+was run with H_forecast = 0), the function returns gate_status='skip' with a
+clear reason rather than raising.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 from ..config import (
-    FORECASTS_DIR, FITS_DIR, MODEL_VERSION,
-    HORIZON_PRIOR_DRIFT_TAU, FORECAST_HORIZONS_MONTHS,
-)
-from ..theorems.D_forecast_horizon import (
-    horizon_validity, stationary_marginal_time,
+    FITS_DIR, FORECASTS_DIR, FORECAST_HORIZONS_MONTHS, MODEL_VERSION,
 )
 
 
 def latest_fit_dir() -> Path:
-    candidates = sorted(p for p in FITS_DIR.iterdir() if p.is_dir() and (p / "fit_summary.json").exists())
+    """Return the most recent directory in FITS_DIR that has a fit_summary.json."""
+    if not FITS_DIR.exists():
+        raise FileNotFoundError(f"{FITS_DIR} does not exist; run `david fit` first.")
+    candidates = sorted(
+        p for p in FITS_DIR.iterdir()
+        if p.is_dir() and (p / "fit_summary.json").exists()
+    )
     if not candidates:
-        raise FileNotFoundError("no fit found; run `david fit` first")
+        raise FileNotFoundError("No completed fit found; run `david fit` first.")
     return candidates[-1]
 
 
 def load_posterior(fit_dir: Path) -> dict[str, np.ndarray]:
-    """Load posterior draws of (alpha_activity, jump, dwell_lambda, terminal regime posteriors)."""
-    # TODO: read from draws.parquet (column-store of cmdstanpy draws)
-    # For scaffolding, the loader returns the schema; the user wires the actual reader.
-    raise NotImplementedError(
-        "Wire to data/fits/{run_id}/draws.parquet reader. "
-        "Schema: alpha_activity[L,K], jump[L,L], dwell_lambda[L], z_T[R,L] (terminal posterior)."
-    )
+    """Load posterior draws from draws.parquet → {column_name: (D,) array}.
+
+    Raises FileNotFoundError when draws.parquet is absent.
+    """
+    draws_path = fit_dir / "draws.parquet"
+    if not draws_path.exists():
+        raise FileNotFoundError(
+            f"draws.parquet not found in {fit_dir}. Run `david fit` first."
+        )
+    try:
+        import pandas as pd
+        df = pd.read_parquet(draws_path)
+    except Exception as exc:
+        raise FileNotFoundError(
+            f"Could not read {draws_path}: {exc}"
+        ) from exc
+    return {col: df[col].to_numpy() for col in df.columns}
+
+
+def _parse_a_future(posterior: dict[str, np.ndarray]) -> dict[tuple[int, int, int], np.ndarray]:
+    """Parse a_future[r,h,k] columns from the posterior dict.
+
+    Stan 1-indexed: a_future[1,1,1] is series=1, horizon=1, tactic=1.
+    Returns {(r, h, k): draws_array} with 0-based series/tactic for convenience.
+    """
+    pattern = re.compile(r'^a_future\[(\d+),(\d+),(\d+)\]$')
+    result: dict[tuple[int, int, int], np.ndarray] = {}
+    for col, vals in posterior.items():
+        m = pattern.match(col)
+        if m:
+            r, h, k = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            result[(r, h, k)] = vals.astype(float)
+    return result
 
 
 def emit_forecasts(
     horizon_months: int = 6,
     cell_filter: str | None = None,
     out_dir: Path | None = None,
+    fit_dir: Path | None = None,
 ) -> dict[str, Any]:
+    """Emit per-cell forecast records for a given horizon.
+
+    Parameters
+    ----------
+    horizon_months : int
+        Forecast horizon in months. Must be in FORECAST_HORIZONS_MONTHS.
+    cell_filter : str | None
+        Optional filter string; if supplied, only cells whose key contains
+        the string are emitted (e.g. 'r1k2' for series 1 tactic 2).
+    out_dir : Path | None
+        Output directory. Defaults to FORECASTS_DIR / run_id.
+    fit_dir : Path | None
+        Fit directory to use. Defaults to latest_fit_dir() if None.
+
+    Returns
+    -------
+    dict
+        Typed result with gate_status, n_cells, cells_path, horizon, fit_run_id.
+    """
     if horizon_months not in FORECAST_HORIZONS_MONTHS:
-        raise ValueError(f"horizon must be one of {FORECAST_HORIZONS_MONTHS}")
-    fit_dir = latest_fit_dir()
+        raise ValueError(
+            f"horizon_months={horizon_months} not in pre-registered "
+            f"FORECAST_HORIZONS_MONTHS={FORECAST_HORIZONS_MONTHS}"
+        )
+
+    try:
+        fit_dir = fit_dir or latest_fit_dir()
+    except FileNotFoundError as exc:
+        return {"gate_status": "fail", "reason": str(exc), "n_cells": 0}
+
     run_id = fit_dir.name
     out_dir = out_dir or FORECASTS_DIR / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    posterior = load_posterior(fit_dir)
-    cells_records: list[dict[str, Any]] = []
+    # Load posterior draws
+    try:
+        posterior = load_posterior(fit_dir)
+    except FileNotFoundError as exc:
+        return {"gate_status": "fail", "reason": str(exc), "n_cells": 0,
+                "horizon": horizon_months, "fit_run_id": run_id}
 
-    # Iterate strata; here `g` is (c, p, k). Cell index has time t_now = today.
-    for g in iter_strata(cell_filter):
-        h_validity = horizon_validity(
-            cell_id=g.id,
-            Pi_off_diag=g.posterior_Pi_off,           # mean transition
-            dwell_mean=g.posterior_dwell_mean,
-            z_t_distribution=g.terminal_regime_posterior,
-            h_max=max(FORECAST_HORIZONS_MONTHS) + 6,
-            tau=HORIZON_PRIOR_DRIFT_TAU,
+    # Parse a_future columns
+    a_future = _parse_a_future(posterior)
+    if not a_future:
+        return {
+            "gate_status": "skip",
+            "reason": (
+                "a_future not present in draws.parquet; "
+                "re-run `david fit` with H_forecast>0 "
+                f"(set to max(FORECAST_HORIZONS_MONTHS)={max(FORECAST_HORIZONS_MONTHS)})"
+            ),
+            "n_cells": 0,
+            "cells_path": None,
+            "horizon": horizon_months,
+            "fit_run_id": run_id,
+        }
+
+    # Load theorem D' h_star from fit_summary (pre-computed in run_fit)
+    h_star: int = 0
+    fit_summary: dict = {}
+    summary_path = fit_dir / "fit_summary.json"
+    if summary_path.exists():
+        fit_summary = json.loads(summary_path.read_text())
+        h_star = (
+            fit_summary.get("theorems", {})
+                       .get("D_prime", {})
+                       .get("h_star_months", 0)
         )
 
-        below_h_star = horizon_months <= h_validity.h_star_months
+    below_h_star = horizon_months <= h_star
 
-        # Conditional vs marginal forecast
-        if below_h_star:
-            p_active_draws = g.forecast_p_active_draws(horizon_months)   # posterior, (D,)
+    # Build cell records for the requested horizon
+    cells_records: list[dict[str, Any]] = []
+    timestamp = datetime.utcnow().isoformat() + "Z"
+
+    for (r, h, k), draws in sorted(a_future.items()):
+        if h != horizon_months:
+            continue
+        cell_key = f"r{r}k{k}"
+        if cell_filter and cell_filter not in cell_key:
+            continue
+
+        median   = float(np.median(draws))
+        lo80, hi80 = (float(x) for x in np.quantile(draws, [0.10, 0.90]))
+        lo95, hi95 = (float(x) for x in np.quantile(draws, [0.025, 0.975]))
+
+        # p_marginal: mean over all draws and horizon steps (rough stationary approx)
+        # A more precise value comes from theorem D'.stationary_marginal_time per stratum.
+        marginal_keys = [(r, hh, k) for hh in range(1, max(FORECAST_HORIZONS_MONTHS) + 1)
+                         if (r, hh, k) in a_future]
+        if marginal_keys:
+            marginal_pool = np.concatenate([a_future[key] for key in marginal_keys])
+            p_marginal = float(marginal_pool.mean())
         else:
-            # Replace with marginal regime prediction: time-weighted stationary
-            pi_inf = stationary_marginal_time(g.posterior_Pi_off, g.posterior_dwell_mean)
-            p_active_draws = g.marginal_p_active_draws(pi_inf)
+            p_marginal = median  # fallback
 
-        median = float(np.median(p_active_draws))
-        lo80, hi80 = (float(x) for x in np.quantile(p_active_draws, [0.10, 0.90]))
-        lo95, hi95 = (float(x) for x in np.quantile(p_active_draws, [0.025, 0.975]))
-
-        cell = {
-            "cell": {"c": g.c, "t_now": date.today().isoformat(), "p": g.p, "k": g.k},
+        record: dict[str, Any] = {
+            "cell": {
+                "series": r,
+                "tactic": k,
+                # Country / policy / tactic labels populated by ingest pipeline;
+                # stubs here until source_registry is wired.
+                "country": f"series_{r}",
+                "policy": "unknown",
+                "tactic_label": f"tactic_{k}",
+            },
             "horizon_months": horizon_months,
             "p_active": median,
+            "p_marginal": p_marginal,
             "credible_interval_80": [lo80, hi80],
             "credible_interval_95": [lo95, hi95],
-            "regime_distribution": g.regime_distribution_at(horizon_months),
             "horizon_validity": {
-                "h_star_months": h_validity.h_star_months,
-                "prior_drift_share": h_validity.horizon_validity_curve[-1][1],
+                "h_star_months": h_star,
                 "below_h_star": below_h_star,
+                "forecast_route": (
+                    "conditional_forecast" if below_h_star
+                    else "horizon_prior_dominated"
+                ),
             },
-            "identification_distance_posterior_median": g.id_distance_median,
-            "informativeness_I_O_posterior_median": g.I_O_median,
-            "informativeness_I_O_lower_95": g.I_O_lower_95,
-            "lambda_endogenous_bounds": g.lambda_bounds,
-            # Routing decision is filled in by router.apply_forecast_routing()
-            "forecast_route": "pending_route",
-            "route_reasons": [],
+            # Identification and informativeness from theorem gates (global level)
+            "theorem_A_prime": fit_summary.get("theorems", {}).get("A_prime", {}),
+            "theorem_B_prime": fit_summary.get("theorems", {}).get("B_prime", {}),
             "model_version": MODEL_VERSION,
             "fit_run_id": run_id,
-            "evidence_cutoff": g.evidence_cutoff,
+            "timestamp": timestamp,
         }
-        cells_records.append(cell)
+        cells_records.append(record)
 
     cells_path = out_dir / f"cells_h{horizon_months:02d}.json"
     cells_path.write_text(json.dumps(cells_records, indent=2))
+
     return {
+        "gate_status": "pass",
         "n_cells": len(cells_records),
         "cells_path": str(cells_path),
         "horizon": horizon_months,
         "fit_run_id": run_id,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": timestamp,
     }
 
 
-def iter_strata(cell_filter: str | None):
-    """TODO: iterate strata bound to the current fit.
-
-    Each stratum exposes:
-      .c, .p, .k, .id, .evidence_cutoff
-      .posterior_Pi_off, .posterior_dwell_mean, .terminal_regime_posterior
-      .forecast_p_active_draws(h), .marginal_p_active_draws(pi_inf)
-      .regime_distribution_at(h)
-      .id_distance_median, .I_O_median, .I_O_lower_95, .lambda_bounds
-    """
-    raise NotImplementedError(
-        "Implement stratum iterator backed by the fit artifact directory "
-        "and the source_registry + opportunity_units CSV."
-    )
+def emit_all_horizons(
+    cell_filter: str | None = None,
+    out_dir: Path | None = None,
+    fit_dir: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Emit cells_h*.json for all pre-registered forecast horizons."""
+    try:
+        resolved_fit = fit_dir or latest_fit_dir()
+    except FileNotFoundError as exc:
+        return [{"gate_status": "fail", "reason": str(exc), "n_cells": 0}]
+    return [
+        emit_forecasts(h, cell_filter=cell_filter, out_dir=out_dir, fit_dir=resolved_fit)
+        for h in FORECAST_HORIZONS_MONTHS
+    ]
