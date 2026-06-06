@@ -142,7 +142,7 @@ class GroqBackend:
                 "GROQ_API_KEY not set. "
                 "Export it before running the coder: export GROQ_API_KEY=gsk_..."
             )
-        from groq import Groq  # imported lazily so Groq package is optional
+        from groq import Groq  # imported here so unit tests can patch without side-effects
         self._client = Groq(api_key=api_key)
         self._cfg = cfg
         self._template = AnthropicBackend._load_template(cfg.prompt_template_id)
@@ -157,6 +157,7 @@ class GroqBackend:
             model=self._cfg.model,
             max_tokens=4,
             temperature=self._cfg.temperature,
+            seed=self._cfg.seed,  # Groq supports seed for reproducibility
             messages=[
                 {"role": "system", "content": self._SYSTEM},
                 {"role": "user", "content": user_msg},

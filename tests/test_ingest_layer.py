@@ -250,6 +250,84 @@ def test_anthropic_backend_code_item_parses_0_and_1(monkeypatch):
             assert backend.code_item("text", "tactic") == 0
 
 
+def test_get_backend_groq_no_key():
+    """get_backend('groq') raises RuntimeError when GROQ_API_KEY is missing."""
+    import os
+    from david.ingest.llm_coder import LlmCoderConfig, get_backend
+    cfg = LlmCoderConfig(
+        coder_id="groq_001", provider="groq", model="llama-3.3-70b-versatile",
+        prompt_template_id="default", seed=1, temperature=0.0,
+    )
+    with patch.dict(os.environ, {"GROQ_API_KEY": ""}):
+        with pytest.raises(RuntimeError, match="GROQ_API_KEY not set"):
+            get_backend(cfg)
+
+
+def test_groq_backend_code_item_parses_0_and_1(monkeypatch):
+    """GroqBackend.code_item() parses '0', '1', 'Yes', 'No' correctly."""
+    import os
+    from david.ingest.llm_coder import GroqBackend, LlmCoderConfig
+
+    cfg = LlmCoderConfig(
+        coder_id="groq_001", provider="groq", model="llama-3.3-70b-versatile",
+        prompt_template_id="default", seed=1, temperature=0.0,
+    )
+
+    mock_choice = MagicMock()
+    mock_choice.message.content = "1"
+    mock_response = MagicMock()
+    mock_response.choices = [mock_choice]
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = mock_response
+
+    mock_groq_module = MagicMock()
+    mock_groq_module.Groq.return_value = mock_client
+
+    with patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test"}):
+        with patch.dict("sys.modules", {"groq": mock_groq_module}):
+            backend = GroqBackend(cfg)
+
+            mock_choice.message.content = "1"
+            assert backend.code_item("Philip Morris blocked the bill", "SIO") == 1
+
+            mock_choice.message.content = "0"
+            assert backend.code_item("Unrelated news article", "SIO") == 0
+
+            mock_choice.message.content = "Yes, clearly"
+            assert backend.code_item("text", "MIO") == 1
+
+            mock_choice.message.content = "garbage output"
+            assert backend.code_item("text", "CSIO") == 0
+
+
+def test_groq_backend_seed_passed_to_api(monkeypatch):
+    """GroqBackend passes cfg.seed to the Groq API for reproducibility."""
+    import os
+    from david.ingest.llm_coder import GroqBackend, LlmCoderConfig
+
+    cfg = LlmCoderConfig(
+        coder_id="groq_seed2", provider="groq", model="llama-3.3-70b-versatile",
+        prompt_template_id="default", seed=42, temperature=0.0,
+    )
+
+    mock_choice = MagicMock()
+    mock_choice.message.content = "1"
+    mock_response = MagicMock()
+    mock_response.choices = [mock_choice]
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = mock_response
+    mock_groq_module = MagicMock()
+    mock_groq_module.Groq.return_value = mock_client
+
+    with patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test"}):
+        with patch.dict("sys.modules", {"groq": mock_groq_module}):
+            backend = GroqBackend(cfg)
+            backend.code_item("text", "SIO")
+            call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+            assert call_kwargs["seed"] == 42
+
+
 def test_load_gold_labels(tmp_path):
     from david.ingest.llm_coder import _load_gold_labels
     csv_path = tmp_path / "gold.csv"
