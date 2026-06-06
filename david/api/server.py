@@ -23,10 +23,12 @@ without a live database.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from ..config import FITS_DIR, FORECASTS_DIR
@@ -35,6 +37,20 @@ api = FastAPI(
     title="DAVID/M0.1 forecast API",
     version="0.1.0",
     description="Read-only API for DAVID/M0.1 forecasts and evidence.",
+)
+
+# CORS — allow Vercel frontend + local dev
+_ALLOWED_ORIGINS = [o.strip() for o in os.environ.get(
+    "ALLOWED_ORIGINS",
+    "https://david-x8lj.vercel.app,http://localhost:3001,http://localhost:3000",
+).split(",") if o.strip()]
+
+api.add_middleware(
+    CORSMiddleware,
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
 )
 
 
@@ -346,6 +362,8 @@ def list_forecast_cells(
 
 # ─── server entry point ───────────────────────────────────────────────────────
 
-def run(port: int = 8080) -> None:
+def run(port: int | None = None) -> None:
     import uvicorn
-    uvicorn.run(api, host="127.0.0.1", port=port)
+    _port = port or int(os.environ.get("PORT", 8080))
+    _host = "0.0.0.0" if os.environ.get("RAILWAY_ENVIRONMENT") else "127.0.0.1"
+    uvicorn.run(api, host=_host, port=_port)
