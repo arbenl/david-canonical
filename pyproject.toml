@@ -24,6 +24,7 @@ dependencies = [
     "typer>=0.12",
     "rich>=13.7",
     "anthropic>=0.30",
+    "groq>=0.8",
     "psycopg2-binary>=2.9",
 ]
 
