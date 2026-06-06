@@ -40,6 +40,79 @@ api = FastAPI(
 
 # ─── helpers ─────────────────────────────────────────────────────────────────
 
+@api.get("/queue")
+def get_queue() -> Any:
+    """Current adjudicator queue (items needing human review)."""
+    from ..config import DATA_ROOT
+    q_path = DATA_ROOT / "adjudicator_queue.json"
+    if not q_path.exists():
+        return {"n_in_queue": 0, "items": [], "generated_at": None}
+    return json.loads(q_path.read_text())
+
+
+@api.get("/fit-runs/{run_id}")
+def get_fit_run(run_id: str) -> Any:
+    """Full fit summary for a specific run (theorems, gates, MCMC diagnostics)."""
+    summary_path = FITS_DIR / run_id / "fit_summary.json"
+    if not summary_path.exists():
+        raise HTTPException(status_code=404, detail=f"run_id={run_id!r} not found")
+    return json.loads(summary_path.read_text())
+
+
+@api.get("/sbc")
+def get_sbc() -> Any:
+    """Latest SBC results — measurement + forecast layers."""
+    sbc_path          = FITS_DIR / "sbc" / "sbc_summary.json"
+    forecast_sbc_path = FITS_DIR / "forecast_sbc" / "forecast_sbc_summary.json"
+    result: dict[str, Any] = {}
+    if sbc_path.exists():
+        result["measurement"] = json.loads(sbc_path.read_text())
+    if forecast_sbc_path.exists():
+        result["forecast"] = json.loads(forecast_sbc_path.read_text())
+    if not result:
+        raise HTTPException(status_code=404,
+                            detail="No SBC results yet. Run `david sbc` first.")
+    return result
+
+
+@api.get("/config")
+def get_config() -> dict:
+    """Pre-registered configuration values (thresholds, tactic classes, model version)."""
+    from ..config import (
+        ID_DISTANCE_FLOOR, INFORMATIVENESS_FLOOR_LOWER_95,
+        POSTERIOR_FDP_DEFAULT_Q, HORIZON_PRIOR_DRIFT_TAU,
+        ADJUDICATOR_DISAGREEMENT_THRESHOLD, GOLD_STANDARD_SAMPLE_RATE,
+        R_HAT_MAX, BULK_ESS_MIN, TAIL_ESS_MIN, DIVERGENCES_ALLOWED,
+        SBC_KS_ALPHA, SBC_BONFERRONI, FORECAST_HORIZONS_MONTHS,
+        TACTIC_CLASSES, MODEL_VERSION,
+    )
+    return {
+        "model_version": MODEL_VERSION,
+        "tactic_classes": list(TACTIC_CLASSES),
+        "forecast_horizons_months": list(FORECAST_HORIZONS_MONTHS),
+        "theorem_floors": {
+            "A_prime_id_distance": ID_DISTANCE_FLOOR,
+            "B_prime_informativeness_lower_95": INFORMATIVENESS_FLOOR_LOWER_95,
+            "C_prime_posterior_fdp": POSTERIOR_FDP_DEFAULT_Q,
+            "D_prime_horizon_drift_tau": HORIZON_PRIOR_DRIFT_TAU,
+        },
+        "fit_thresholds": {
+            "rhat_max": R_HAT_MAX,
+            "bulk_ess_min": BULK_ESS_MIN,
+            "tail_ess_min": TAIL_ESS_MIN,
+            "divergences_allowed": DIVERGENCES_ALLOWED,
+        },
+        "sbc": {
+            "ks_alpha": SBC_KS_ALPHA,
+            "bonferroni": SBC_BONFERRONI,
+        },
+        "human_loop": {
+            "disagreement_threshold": ADJUDICATOR_DISAGREEMENT_THRESHOLD,
+            "gold_sample_rate": GOLD_STANDARD_SAMPLE_RATE,
+        },
+    }
+
+
 def _latest_forecast_dir() -> Path:
     if not FORECASTS_DIR.exists():
         raise HTTPException(status_code=404, detail="No forecasts yet")
