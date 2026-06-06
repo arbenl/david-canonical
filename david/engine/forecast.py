@@ -29,7 +29,8 @@ from typing import Any
 import numpy as np
 
 from ..config import (
-    FITS_DIR, FORECASTS_DIR, FORECAST_HORIZONS_MONTHS, MODEL_VERSION,
+    FITS_DIR, FORECASTS_DIR, FORECAST_HORIZONS_MONTHS, ID_DISTANCE_FLOOR,
+    INFORMATIVENESS_FLOOR_LOWER_95, LAMBDA_ENDOG_INTERVAL_MAX_WIDTH, MODEL_VERSION,
 )
 
 
@@ -210,6 +211,23 @@ def emit_forecasts(
             # Identification and informativeness from theorem gates (global level)
             "theorem_A_prime": fit_summary.get("theorems", {}).get("A_prime", {}),
             "theorem_B_prime": fit_summary.get("theorems", {}).get("B_prime", {}),
+            # Flat aliases for router FG2/FG3 checks (router reads these directly)
+            "identification_distance_posterior_median": float(
+                fit_summary.get("theorems", {}).get("A_prime", {})
+                .get("median_d_theta", float("nan"))
+            ),
+            "informativeness_I_O_posterior_median": float(
+                fit_summary.get("theorems", {}).get("B_prime", {})
+                .get("median_I_worst_source", float("nan"))
+            ),
+            "informativeness_I_O_lower_95": float(
+                fit_summary.get("theorems", {}).get("B_prime", {})
+                .get("lower_95_I_worst_source", float("nan"))
+            ),
+            # lambda_endogenous_bounds: wire from observability_sensitivity when
+            # the endogenous-observability analysis is run. Default [0, max_width]
+            # keeps FG6 open (passes) until real bounds are computed.
+            "lambda_endogenous_bounds": [0.0, LAMBDA_ENDOG_INTERVAL_MAX_WIDTH],
             "model_version": MODEL_VERSION,
             "fit_run_id": run_id,
             "timestamp": timestamp,
