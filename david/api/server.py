@@ -1,17 +1,66 @@
-"""Read-only forecast HTTP server."""
+"""DAVID/M0.1 — Read-only forecast + evidence HTTP API.
+
+File-based endpoints (existing):
+    GET /healthz
+    GET /forecasts/latest?horizon=6
+    GET /forecasts/{run_id}/cells_h{horizon}.json
+    GET /forecasts/{run_id}/route_ledger.json
+    GET /forecasts/{run_id}/falsification_ledger.json
+
+Database-backed endpoints (new):
+    GET /strata
+    GET /sources
+    GET /evidence?stratum_id=&adjudicated=&limit=100
+    GET /evidence/{evidence_id}
+    GET /fit-runs?limit=10
+    GET /forecast-cells?run_id=&horizon_months=
+
+All endpoints return JSON. DB endpoints fall back to a 503 with a clear
+message if Postgres is unreachable, so the file-based routes continue to work
+without a live database.
+"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 from ..config import FITS_DIR, FORECASTS_DIR
 
+api = FastAPI(
+    title="DAVID/M0.1 forecast API",
+    version="0.1.0",
+    description="Read-only API for DAVID/M0.1 forecasts and evidence.",
+)
 
-api = FastAPI(title="DAVID/M0.1 forecast API", version="0.1.0")
 
+# ─── helpers ─────────────────────────────────────────────────────────────────
+
+def _latest_forecast_dir() -> Path:
+    if not FORECASTS_DIR.exists():
+        raise HTTPException(status_code=404, detail="No forecasts yet")
+    candidates = sorted(p for p in FORECASTS_DIR.iterdir() if p.is_dir())
+    if not candidates:
+        raise HTTPException(status_code=404, detail="No forecasts yet")
+    return candidates[-1]
+
+
+def _db_error_503(exc: Exception) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": "database_unavailable",
+            "detail": str(exc),
+            "hint": "Start Postgres with `docker compose up -d` then `david db init`",
+        },
+    )
+
+
+# ─── file-based routes (preserved) ───────────────────────────────────────────
 
 @api.get("/healthz")
 def healthz() -> dict:
@@ -51,12 +100,178 @@ def falsification_ledger(run_id: str) -> dict:
     return json.loads(path.read_text())
 
 
-def _latest_forecast_dir() -> Path:
-    candidates = sorted(p for p in FORECASTS_DIR.iterdir() if p.is_dir())
-    if not candidates:
-        raise HTTPException(status_code=404, detail="no forecasts yet")
-    return candidates[-1]
+# ─── database-backed routes ───────────────────────────────────────────────────
 
+@api.get("/strata")
+def list_strata() -> Any:
+    """All strata with their observability score and evidence counts."""
+    try:
+        from ..db.connection import get_conn
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT s.stratum_id, s.country, s.policy, s.observability,
+                           COUNT(e.evidence_id)  AS n_evidence,
+                           COUNT(e.evidence_id) FILTER (WHERE e.adjudicated)
+                                                 AS n_adjudicated
+                    FROM   strata s
+                    LEFT JOIN evidence_items e USING (stratum_id)
+                    GROUP BY s.stratum_id, s.country, s.policy, s.observability
+                    ORDER BY s.stratum_id
+                """)
+                cols = [d[0] for d in cur.description]
+                rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+        return {"strata": rows, "n": len(rows)}
+    except Exception as exc:
+        return _db_error_503(exc)
+
+
+@api.get("/sources")
+def list_sources() -> Any:
+    """All sources in the database."""
+    try:
+        from ..db.connection import get_conn
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT source_id, family, ingest_kind, endpoint,
+                           enabled, rho_prior_mean, delta_prior_mean
+                    FROM   sources
+                    ORDER  BY source_id
+                """)
+                cols = [d[0] for d in cur.description]
+                rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+        return {"sources": rows, "n": len(rows)}
+    except Exception as exc:
+        return _db_error_503(exc)
+
+
+@api.get("/evidence")
+def list_evidence(
+    stratum_id: Optional[str] = Query(None, description="Filter by stratum_id"),
+    adjudicated: Optional[bool] = Query(None, description="Filter by adjudicated flag"),
+    source_id: Optional[str] = Query(None, description="Filter by source_id"),
+    limit: int = Query(100, ge=1, le=5000, description="Max rows to return"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+) -> Any:
+    """List evidence items with optional filters."""
+    try:
+        from ..db.connection import get_conn
+        conditions: list[str] = []
+        params: list[Any] = []
+        if stratum_id is not None:
+            conditions.append("stratum_id = %s")
+            params.append(stratum_id)
+        if adjudicated is not None:
+            conditions.append("adjudicated = %s")
+            params.append(adjudicated)
+        if source_id is not None:
+            conditions.append("source_id = %s")
+            params.append(source_id)
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        params += [limit, offset]
+
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    SELECT evidence_id, stratum_id, source_id,
+                           evidence_date::text, title, url, adjudicated
+                    FROM   evidence_items
+                    {where}
+                    ORDER  BY evidence_date DESC, evidence_id
+                    LIMIT  %s OFFSET %s
+                """, params)
+                cols = [d[0] for d in cur.description]
+                rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+
+                # Total count (without pagination)
+                cur.execute(
+                    f"SELECT COUNT(*) FROM evidence_items {where}",
+                    params[:-2],
+                )
+                total = cur.fetchone()[0]
+
+        return {"evidence": rows, "n": len(rows), "total": total,
+                "limit": limit, "offset": offset}
+    except Exception as exc:
+        return _db_error_503(exc)
+
+
+@api.get("/evidence/{evidence_id}")
+def get_evidence(evidence_id: str) -> Any:
+    """Single evidence item with all coder labels."""
+    try:
+        from ..db.connection import get_conn
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT evidence_id, stratum_id, source_id,
+                           evidence_date::text, title, url,
+                           text_content, adjudicated
+                    FROM   evidence_items
+                    WHERE  evidence_id = %s
+                """, (evidence_id,))
+                row = cur.fetchone()
+                if row is None:
+                    raise HTTPException(status_code=404,
+                                        detail=f"evidence_id={evidence_id!r} not found")
+                cols = [d[0] for d in cur.description]
+                item = dict(zip(cols, row))
+
+                cur.execute("""
+                    SELECT coder_id, tactic_k, label, coded_at::text
+                    FROM   coder_labels
+                    WHERE  evidence_id = %s
+                    ORDER  BY coder_id, tactic_k
+                """, (evidence_id,))
+                lbl_cols = [d[0] for d in cur.description]
+                labels = [dict(zip(lbl_cols, r)) for r in cur.fetchall()]
+
+        return {"evidence": item, "labels": labels, "n_labels": len(labels)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return _db_error_503(exc)
+
+
+@api.get("/fit-runs")
+def list_fit_runs(
+    limit: int = Query(10, ge=1, le=200, description="Max rows to return"),
+) -> Any:
+    """Recent fit runs (newest first)."""
+    try:
+        from ..db.repositories import get_fit_runs
+        runs = get_fit_runs(limit=limit)
+        return {"fit_runs": runs, "n": len(runs)}
+    except Exception as exc:
+        return _db_error_503(exc)
+
+
+@api.get("/forecast-cells")
+def list_forecast_cells(
+    run_id: Optional[str] = Query(None, description="Fit run ID; latest if omitted"),
+    horizon_months: Optional[int] = Query(None, description="Filter by horizon"),
+) -> Any:
+    """Forecast cells from the database."""
+    try:
+        from ..db.repositories import get_forecast_cells
+
+        if run_id is None:
+            # Resolve latest run_id from fit_runs table
+            from ..db.repositories import get_fit_runs
+            runs = get_fit_runs(limit=1)
+            if not runs:
+                return {"forecast_cells": [], "n": 0,
+                        "detail": "No fit runs in database. Run `david fit` first."}
+            run_id = runs[0]["run_id"]
+
+        cells = get_forecast_cells(run_id=run_id, horizon_months=horizon_months)
+        return {"run_id": run_id, "forecast_cells": cells, "n": len(cells)}
+    except Exception as exc:
+        return _db_error_503(exc)
+
+
+# ─── server entry point ───────────────────────────────────────────────────────
 
 def run(port: int = 8080) -> None:
     import uvicorn

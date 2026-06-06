@@ -77,16 +77,42 @@ def save_registry(sources: list[Source]) -> None:
 
 
 def get_scraper(source: Source) -> Scraper:
-    """Resolve a scraper module by source_id.
+    """Resolve a scraper adapter by (family, ingest_kind).
 
-    TODO: import dispatch table by family + ingest_kind, e.g.
-        news + rss -> david.ingest.scrapers.news_rss.RssScraper(source)
-        legislative + api -> david.ingest.scrapers.legislative_feed.ApiScraper(source)
+    Dispatch table — add new adapters here as (family, ingest_kind) pairs.
+    The wildcard family "*" matches any family for a given ingest_kind.
+
+    Currently supported:
+        news + rss          → RssScraper
+        civil_society + rss → RssScraper
+        legislative + rss   → RssScraper
+        transparency + rss  → RssScraper
+
+    To add a new adapter:
+        1. Create david/ingest/scrapers/my_adapter.py implementing Scraper protocol
+        2. Add the (family, ingest_kind) key to _DISPATCH below
     """
-    raise NotImplementedError(
-        f"No scraper registered for source_id={source.source_id}. "
-        "Add an adapter in david/ingest/scrapers/ and wire it here."
-    )
+    from .scrapers.news_rss import RssScraper
+
+    _DISPATCH: dict[tuple[str, str], type] = {
+        ("news",          "rss"): RssScraper,
+        ("civil_society", "rss"): RssScraper,
+        ("legislative",   "rss"): RssScraper,
+        ("transparency",  "rss"): RssScraper,
+        ("*",             "rss"): RssScraper,   # catch-all for RSS
+    }
+
+    key = (source.family, source.ingest_kind)
+    cls = _DISPATCH.get(key) or _DISPATCH.get(("*", source.ingest_kind))
+    if cls is None:
+        supported = [f"{f}+{k}" for f, k in _DISPATCH if f != "*"]
+        raise NotImplementedError(
+            f"No scraper for family={source.family!r}, "
+            f"ingest_kind={source.ingest_kind!r}.\n"
+            f"Supported: {supported}\n"
+            "Add an adapter in david/ingest/scrapers/ and register it in get_scraper()."
+        )
+    return cls(source)
 
 
 def run_scrapers(
