@@ -19,8 +19,9 @@ from cmdstanpy import CmdStanModel
 
 from ..config import (
     ADJUDICATED_DIR, BULK_ESS_MIN, DIVERGENCES_ALLOWED, FITS_DIR,
-    FORECAST_HORIZONS_MONTHS, MIN_CHAINS, MIN_POSTERIOR_DRAWS,
-    M01_FORWARD_STAN, MODEL_VERSION, R_HAT_MAX, TAIL_ESS_MIN,
+    FORECAST_HORIZONS_MONTHS, ID_DISTANCE_FLOOR, INFORMATIVENESS_FLOOR_LOWER_95,
+    MIN_CHAINS, MIN_POSTERIOR_DRAWS, M01_FORWARD_STAN, MODEL_VERSION,
+    POSTERIOR_FDP_DEFAULT_Q, R_HAT_MAX, TAIL_ESS_MIN,
 )
 
 _COMPILED_MODEL: CmdStanModel | None = None
@@ -339,6 +340,198 @@ def assemble_fit_data(
     }
 
 
+def _sigmoid(x: np.ndarray) -> np.ndarray:
+    return 1.0 / (1.0 + np.exp(-np.clip(x, -30.0, 30.0)))
+
+
+def _run_theorem_gates(fit: Any, data: dict[str, Any]) -> dict[str, Any]:
+    """Extract posterior draws and run theorem A'/B'/C'/D' gates.
+
+    Each theorem returns a typed dict with a 'gate_status' key.
+    Exceptions are caught per-theorem and surface as gate_status='error'
+    so the fit summary is always fully populated (fail-closed: error ≠ pass).
+    """
+    from ..theorems.A_prime import identification_distance_draws
+    from ..theorems.B_prime import informativeness_draws
+    from ..theorems.C_renamed import compute_posterior_fdp_threshold
+    from ..theorems.D_forecast_horizon import horizon_validity, stationary_marginal_time
+
+    gates: dict[str, Any] = {}
+
+    # Extract raw draws (shared across theorems)
+    delta_raw_d = fit.stan_variable("delta_raw")             # (D, S)
+    j_raw_d     = fit.stan_variable("j_raw")                 # (D, S)
+    delta_obs_d = fit.stan_variable("delta_observability")   # (D, S)
+    j_obs_d     = fit.stan_variable("j_observability")       # (D, S)
+    alpha_act_d = fit.stan_variable("alpha_activity")        # (D, L, K)
+    dwell_d     = fit.stan_variable("dwell_lambda")          # (D, L)
+    log_jump_d  = fit.stan_variable("log_jump")              # (D, L, L)
+
+    D_draws = delta_raw_d.shape[0]
+    # Detection probabilities at representative observability O = 0.5
+    O_rep   = 0.5
+    delta_d = 0.30 * _sigmoid(delta_raw_d + delta_obs_d * O_rep)  # (D, S)
+    j_d     = _sigmoid(j_raw_d + j_obs_d * O_rep)                 # (D, S)
+    rho_d   = delta_d + (1.0 - delta_d) * j_d                     # (D, S)
+    # phi: marginal activity probability per draw.
+    # Use min over (L, K) — worst-case regime × tactic — so the identification
+    # check is conservative: the hardest-to-identify cell sets the bound.
+    phi_d = _sigmoid(alpha_act_d.reshape(D_draws, -1)).min(axis=1)  # (D,)
+
+    # ── Theorem A' — practical identification distance ────────────────────────
+    try:
+        d_theta = identification_distance_draws(phi_d, rho_d, delta_d)  # (D,)
+        med_d = float(np.median(d_theta))
+        gates["A_prime"] = {
+            "theorem": "A_prime",
+            "median_d_theta": med_d,
+            "q05_d_theta": float(np.quantile(d_theta, 0.05)),
+            "floor": ID_DISTANCE_FLOOR,
+            "gate_status": "pass" if med_d >= ID_DISTANCE_FLOOR else "fail",
+            "reason": (
+                "d_theta_above_floor" if med_d >= ID_DISTANCE_FLOOR
+                else f"d_theta_median_{med_d:.4f}_below_floor_{ID_DISTANCE_FLOOR}"
+            ),
+        }
+    except Exception as exc:
+        gates["A_prime"] = {"theorem": "A_prime", "gate_status": "error", "reason": str(exc)}
+
+    # ── Theorem B' — source informativeness ───────────────────────────────────
+    try:
+        I_d = informativeness_draws(rho_d, delta_d)       # (D, S)
+        # Conservative: worst source per draw, then lower 95% credible bound
+        I_worst    = I_d.min(axis=1)                      # (D,)
+        I_lower95  = float(np.quantile(I_worst, 0.025))
+        I_med      = float(np.median(I_worst))
+        gates["B_prime"] = {
+            "theorem": "B_prime",
+            "median_I_worst_source": I_med,
+            "lower_95_I_worst_source": I_lower95,
+            "floor": INFORMATIVENESS_FLOOR_LOWER_95,
+            "gate_status": "pass" if I_lower95 >= INFORMATIVENESS_FLOOR_LOWER_95 else "fail",
+            "reason": (
+                "informativeness_above_floor"
+                if I_lower95 >= INFORMATIVENESS_FLOOR_LOWER_95
+                else f"I_lower95_{I_lower95:.4f}_below_floor_{INFORMATIVENESS_FLOOR_LOWER_95}"
+            ),
+        }
+    except Exception as exc:
+        gates["B_prime"] = {"theorem": "B_prime", "gate_status": "error", "reason": str(exc)}
+
+    # ── Theorem C' — posterior FDP routing ────────────────────────────────────
+    try:
+        # Mean posterior activity probability for each (L, K) cell
+        p_hat_cells = _sigmoid(alpha_act_d.reshape(D_draws, -1)).mean(axis=0)  # (L*K,)
+        C_result = compute_posterior_fdp_threshold(p_hat_cells)
+        gates["C_prime"] = {
+            "theorem": "C_prime",
+            "n_cells": C_result.n_cells,
+            "n_flagged": C_result.n_flagged,
+            "threshold_p": C_result.threshold_p,
+            "posterior_expected_fdp": C_result.posterior_expected_fdp_at_threshold,
+            "q_target": POSTERIOR_FDP_DEFAULT_Q,
+            "gate_status": "pass",   # C' routes; it does not block the fit
+            "reason": (
+                f"flagged_{C_result.n_flagged}_of_{C_result.n_cells}_"
+                f"cells_at_q={POSTERIOR_FDP_DEFAULT_Q}"
+            ),
+        }
+    except Exception as exc:
+        gates["C_prime"] = {"theorem": "C_prime", "gate_status": "error", "reason": str(exc)}
+
+    # ── Theorem D' — forecast horizon validity ────────────────────────────────
+    try:
+        # Use posterior median Pi and dwell_lambda (representative point for MC)
+        Pi_log_med = np.median(log_jump_d, axis=0)   # (L, L) log-scale
+        Pi_med     = np.exp(Pi_log_med)
+        np.fill_diagonal(Pi_med, 0.0)
+        row_sums   = Pi_med.sum(axis=1, keepdims=True)
+        row_sums   = np.where(row_sums == 0, 1.0, row_sums)  # guard zero rows
+        Pi_med     = Pi_med / row_sums
+        dwell_med  = np.median(dwell_d, axis=0)       # (L,)
+        # z_T prior: use stationary marginal (conservative; no stratum data here)
+        pi_inf = stationary_marginal_time(Pi_med, dwell_med)
+        D_hv = horizon_validity(
+            cell_id="overall",
+            Pi_off_diag=Pi_med,
+            dwell_mean=dwell_med,
+            z_t_distribution=pi_inf,
+            h_max=max(FORECAST_HORIZONS_MONTHS),
+            n_mc=500,   # fast approximation; increase in production
+        )
+        gates["D_prime"] = {
+            "theorem": "D_prime",
+            "h_star_months": D_hv.h_star_months,
+            "tau": D_hv.tau,
+            "prior_drift_share_at_h_max": D_hv.prior_drift_share_at_h_max,
+            "forecast_horizons": list(FORECAST_HORIZONS_MONTHS),
+            "gate_status": (
+                "pass" if D_hv.h_star_months >= min(FORECAST_HORIZONS_MONTHS)
+                else "fail"
+            ),
+            "reason": f"h_star={D_hv.h_star_months}_months",
+        }
+    except Exception as exc:
+        gates["D_prime"] = {"theorem": "D_prime", "gate_status": "error", "reason": str(exc)}
+
+    return gates
+
+
+def _run_f1_gate(data: dict[str, Any], n_prior_worlds: int = 200) -> dict[str, Any]:
+    """F1 prior predictive realism check.
+
+    Draws n_prior_worlds synthetic worlds from the prior with the same
+    (R, T, L, K, S, M) as the fit data, computes per-world Y-rate
+    (fraction of labels = 1), and checks whether the prior predictive
+    median Y-rate falls within the historical band derived from the
+    observed label data.
+
+    Historical band: [5th, 95th] percentile of per-time-period Y-rates.
+    Band width clamped to ≥ 0.10 to prevent false negatives on small T.
+    """
+    from ..simulator.synthetic_world import sample_world, HyperPrior
+    from ..simulator.adversarial_battery import F1_prior_predictive_realism
+
+    prior = HyperPrior(
+        R=data["R"], T=data["T"], L=data["L"],
+        K=data["K"], S=data["S"], M=data["M"], H=1,
+    )
+    prior_Y_rates = np.array([
+        float(sample_world(prior, seed=i).y.ravel().mean())
+        for i in range(n_prior_worlds)
+    ])
+
+    # Historical band from per-time-period label positive rates
+    unit_time_arr  = np.array(data["unit_time"])      # (U,)
+    y_arr          = np.array(data["y"], dtype=float) # (N_label,)
+    label_unit_arr = np.array(data["label_unit"])     # (N_label,)
+    label_time     = unit_time_arr[label_unit_arr - 1]  # (N_label,) — 0-based unit → time
+    unique_times   = np.unique(label_time)
+    per_time_rates = np.array([
+        y_arr[label_time == t].mean() for t in unique_times
+    ])
+    hist_5th  = float(np.quantile(per_time_rates, 0.05))
+    hist_95th = float(np.quantile(per_time_rates, 0.95))
+    # Clamp band width to avoid trivially-failing gates on sparse data
+    if hist_95th - hist_5th < 0.10:
+        mid       = (hist_5th + hist_95th) / 2.0
+        hist_5th  = max(0.0, mid - 0.05)
+        hist_95th = min(1.0, mid + 0.05)
+
+    result = F1_prior_predictive_realism(prior_Y_rates, hist_5th, hist_95th)
+    return {
+        "gate_status": result.gate_status,
+        "statistic": result.statistic,
+        "prior_predictive_Y_rate_median": float(np.median(prior_Y_rates)),
+        "prior_predictive_Y_rate_5th": float(np.quantile(prior_Y_rates, 0.05)),
+        "prior_predictive_Y_rate_95th": float(np.quantile(prior_Y_rates, 0.95)),
+        "historical_band_5th": hist_5th,
+        "historical_band_95th": hist_95th,
+        "n_prior_worlds": n_prior_worlds,
+        "reason": result.reason,
+    }
+
+
 def run_fit(run_id: str | None = None) -> dict[str, Any]:
     run_id = run_id or f"fit_{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}_{uuid4().hex[:6]}"
     fit_dir = FITS_DIR / run_id
@@ -374,11 +567,31 @@ def run_fit(run_id: str | None = None) -> dict[str, Any]:
     tail_ess_min = float(summary["ESS_tail"].dropna().min())
     divergences = int(sum(1 for s in diagnostics.split("\n") if "divergent" in s))
 
-    failed: list[str] = []
-    if rhat_max > R_HAT_MAX: failed.append(f"R_hat={rhat_max:.4f}>{R_HAT_MAX}")
-    if bulk_ess_min < BULK_ESS_MIN: failed.append(f"ESS_bulk={bulk_ess_min:.0f}<{BULK_ESS_MIN}")
-    if tail_ess_min < TAIL_ESS_MIN: failed.append(f"ESS_tail={tail_ess_min:.0f}<{TAIL_ESS_MIN}")
-    if divergences > DIVERGENCES_ALLOWED: failed.append(f"divergences={divergences}>{DIVERGENCES_ALLOWED}")
+    mcmc_failed: list[str] = []
+    if rhat_max > R_HAT_MAX:
+        mcmc_failed.append(f"R_hat={rhat_max:.4f}>{R_HAT_MAX}")
+    if bulk_ess_min < BULK_ESS_MIN:
+        mcmc_failed.append(f"ESS_bulk={bulk_ess_min:.0f}<{BULK_ESS_MIN}")
+    if tail_ess_min < TAIL_ESS_MIN:
+        mcmc_failed.append(f"ESS_tail={tail_ess_min:.0f}<{TAIL_ESS_MIN}")
+    if divergences > DIVERGENCES_ALLOWED:
+        mcmc_failed.append(f"divergences={divergences}>{DIVERGENCES_ALLOWED}")
+
+    # Theorem gates (A'/B'/C'/D') — run against posterior draws
+    theorem_gates = _run_theorem_gates(fit, data)
+    theorem_failed = [
+        k for k, v in theorem_gates.items()
+        if v.get("gate_status") in ("fail", "error")
+    ]
+
+    # F1: prior predictive realism
+    f1_gate = _run_f1_gate(data)
+
+    all_failed = (
+        mcmc_failed
+        + [f"theorem_{k}" for k in theorem_failed]
+        + (["F1"] if f1_gate["gate_status"] == "fail" else [])
+    )
 
     fit_summary = {
         "model_version": MODEL_VERSION,
@@ -387,14 +600,17 @@ def run_fit(run_id: str | None = None) -> dict[str, Any]:
         "ess_bulk_min": bulk_ess_min,
         "ess_tail_min": tail_ess_min,
         "divergences": divergences,
+        "theorems": theorem_gates,
         "gates": {
-            "F1": {"gate_status": "pending", "reason": "wire_prior_predictive"},
-            "F3": {"gate_status": "pending", "reason": "wire_ece"},
-            "F4": {"gate_status": "pending", "reason": "wire_auroc_auprc"},
-            "F5": {"gate_status": "pending", "reason": "wire_baselines"},
+            "F1": f1_gate,
+            # F3/F4/F5 require held-out labels or true activity ground-truth;
+            # skip gracefully until cross-validation infrastructure is wired.
+            "F3": {"gate_status": "skip", "reason": "no_held_out_labels"},
+            "F4": {"gate_status": "skip", "reason": "activity_truth_unknown_in_real_data_mode"},
+            "F5": {"gate_status": "skip", "reason": "no_held_out_set"},
         },
-        "gate_status": "fail" if failed else "pass",
-        "reason": "fit_pass" if not failed else "; ".join(failed),
+        "gate_status": "fail" if all_failed else "pass",
+        "reason": "fit_pass" if not all_failed else "; ".join(all_failed),
         "timestamp": datetime.utcnow().isoformat() + "Z",
     }
 
