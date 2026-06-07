@@ -1,16 +1,16 @@
 [
   {
-    "coder_id": "groq_llama33_70b_seed_001",
+    "coder_id": "groq_llama31_8b_seed_001",
     "provider": "groq",
-    "model": "llama-3.3-70b-versatile",
+    "model": "llama-3.1-8b-instant",
     "prompt_template_id": "default",
     "seed": 1,
     "temperature": 0.0
   },
   {
-    "coder_id": "groq_llama33_70b_seed_002",
+    "coder_id": "groq_llama31_8b_seed_002",
     "provider": "groq",
-    "model": "llama-3.3-70b-versatile",
+    "model": "llama-3.1-8b-instant",
     "prompt_template_id": "default",
     "seed": 2,
     "temperature": 0.0
