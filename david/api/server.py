@@ -451,6 +451,56 @@ async def pipeline_status() -> dict:
         return {**base, "last_fit": None, "error": str(exc)}
 
 
+# ─── human adjudication ──────────────────────────────────────────────────────
+
+from fastapi import Body
+
+@api.post("/evidence/{evidence_id}/adjudicate")
+async def adjudicate_evidence(
+    evidence_id: str,
+    body: dict = Body(...),
+    authorization: str = Header(default=""),
+) -> Any:
+    """Submit human adjudication for a single evidence item.
+
+    Body: {"labels": {"SIO": 1, "MIO": 0, "CSIO": 0}}
+
+    Upserts one coder_labels row per tactic with coder_id='human_adjudicator_001',
+    then marks the evidence item as adjudicated=TRUE.
+    Protected by PIPELINE_SECRET.
+    """
+    _auth_check(authorization)
+    labels: dict = body.get("labels", {})
+    if not labels:
+        raise HTTPException(status_code=422, detail="labels dict required, e.g. {\"SIO\":1,\"MIO\":0,\"CSIO\":0}")
+    try:
+        from ..db.repositories import upsert_coder_label, mark_adjudicated
+        from ..db.connection import get_conn
+        # Verify evidence exists
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM evidence_items WHERE evidence_id = %s", (evidence_id,))
+                if not cur.fetchone():
+                    raise HTTPException(status_code=404, detail=f"evidence_id={evidence_id!r} not found")
+        # Upsert one label row per tactic
+        for tactic_k, label_val in labels.items():
+            if label_val not in (0, 1):
+                raise HTTPException(status_code=422, detail=f"label for {tactic_k!r} must be 0 or 1")
+            upsert_coder_label(
+                evidence_id=evidence_id,
+                coder_id="human_adjudicator_001",
+                tactic_k=tactic_k,
+                label=int(label_val),
+            )
+        # Mark adjudicated
+        mark_adjudicated([evidence_id])
+        return {"status": "adjudicated", "evidence_id": evidence_id, "n_labels": len(labels)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return _db_error_503(exc)
+
+
 # ─── server entry point ───────────────────────────────────────────────────────
 
 def run(port: int | None = None) -> None:
