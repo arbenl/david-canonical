@@ -1,0 +1,4 @@
+# Nixpacks build configuration for Railway.
+# CmdStan requires gcc + make to compile Stan C++ models at build time.
+[phases.setup]
+nixPkgs = ["gcc", "gnumake"]
