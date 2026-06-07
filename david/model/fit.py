@@ -28,18 +28,39 @@ _COMPILED_MODEL: CmdStanModel | None = None
 
 
 def _ensure_cmdstan() -> None:
-    """Install CmdStan if it is not already present.
+    """Install CmdStan (and build tools if missing) on first use.
 
-    Fast path: ~/.cmdstan exists (installed during build or a previous run).
-    Slow path: install_cmdstan() — downloads + compiles CmdStan (~10 min).
-               Requires make + g++, which nixpacks.toml guarantees via aptPkgs.
+    Fast path : ~/.cmdstan already present — returns immediately.
+    Slow path : installs make + g++ via apt (if absent), then downloads
+                and compiles CmdStan (~10 min first time only).
     """
+    import os
+    import subprocess
+
     try:
         from cmdstanpy.utils.cmdstan import cmdstan_path
         cmdstan_path()   # raises ValueError if not installed
+        return           # already present
     except ValueError:
-        import cmdstanpy as _csp
-        _csp.install_cmdstan()
+        pass
+
+    # Ensure the C++ build toolchain is present (needed by `make build`)
+    if not _which("make"):
+        print("[david] make not found — installing via apt…", flush=True)
+        subprocess.run(
+            ["apt-get", "install", "-y", "-qq", "make", "g++"],
+            check=False, capture_output=True,
+        )
+
+    print("[david] Installing CmdStan (first run — ~10 min)…", flush=True)
+    import cmdstanpy as _csp
+    _csp.install_cmdstan()
+
+
+def _which(cmd: str) -> bool:
+    """Return True if *cmd* is found on PATH."""
+    import shutil
+    return shutil.which(cmd) is not None
 
 
 def _get_compiled_model() -> CmdStanModel:
