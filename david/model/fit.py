@@ -39,9 +39,10 @@ def _ensure_cmdstan() -> None:
     """Install CmdStan (and build tools if missing) on first use.
 
     Fast path : ~/.cmdstan/cmdstan-{version} already present — returns immediately.
-    Slow path : downloads the tarball directly (no GitHub API call), extracts,
-                builds with make, then registers the path with cmdstanpy.
+    Slow path : apt-get update → install make/g++ → download tarball directly
+                (no GitHub API) → extract → make build → set_cmdstan_path.
     """
+    import os
     import subprocess
     import tarfile
     import urllib.request
@@ -54,12 +55,21 @@ def _ensure_cmdstan() -> None:
     except ValueError:
         pass
 
-    # Ensure the C++ build toolchain is present
-    if not _which("make"):
-        print("[david] make not found — installing via apt…", flush=True)
+    make_bin = _find_executable("make")
+    if make_bin is None:
+        print("[david] make not found — running apt-get update + install…", flush=True)
+        subprocess.run(["apt-get", "update", "-qq"], check=False)
         subprocess.run(
-            ["apt-get", "install", "-y", "-qq", "make", "g++", "libstdc++-12-dev"],
-            check=False, capture_output=True,
+            ["apt-get", "install", "-y", "make", "g++", "libstdc++-12-dev"],
+            check=False,
+        )
+        make_bin = _find_executable("make")
+
+    if make_bin is None:
+        raise RuntimeError(
+            "make not found after apt-get install. "
+            "Ensure nixpacks.toml has aptPkgs=[\"make\",\"g++\"] "
+            "or pre-install CmdStan in build.sh."
         )
 
     print(f"[david] Downloading CmdStan {_CMDSTAN_VERSION}…", flush=True)
@@ -74,8 +84,11 @@ def _ensure_cmdstan() -> None:
     with tarfile.open(tarball, "r:gz") as tar:
         tar.extractall(install_parent)
 
-    print("[david] Building CmdStan (make build — ~8 min)…", flush=True)
-    subprocess.run(["make", "build"], cwd=str(install_dir), check=True)
+    print(f"[david] Building CmdStan with {make_bin} (make build — ~8 min)…", flush=True)
+    # Pass a broad PATH so g++ is also locatable by make sub-processes
+    env = os.environ.copy()
+    env["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:" + env.get("PATH", "")
+    subprocess.run([make_bin, "build"], cwd=str(install_dir), env=env, check=True)
 
     import cmdstanpy as _csp
     _csp.set_cmdstan_path(str(install_dir))
@@ -83,10 +96,20 @@ def _ensure_cmdstan() -> None:
     tarball.unlink(missing_ok=True)
 
 
-def _which(cmd: str) -> bool:
-    """Return True if *cmd* is found on PATH."""
+def _find_executable(name: str) -> str | None:
+    """Return the full path to *name* if found on PATH or common system locations."""
     import shutil
-    return shutil.which(cmd) is not None
+    found = shutil.which(name)
+    if found:
+        return found
+    # Fallback: check standard locations that may be missing from PATH
+    from pathlib import Path
+    for d in ("/usr/bin", "/usr/local/bin", "/bin", "/usr/sbin",
+              "/nix/var/nix/profiles/default/bin", "/root/.nix-profile/bin"):
+        p = Path(d) / name
+        if p.exists():
+            return str(p)
+    return None
 
 
 def _get_compiled_model() -> CmdStanModel:
