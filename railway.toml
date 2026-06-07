@@ -1,7 +1,7 @@
 [build]
-# Install CmdStan (Stan C++ backend) during build so it's baked into the image.
-# Nixpacks auto-runs `uv sync --locked --no-editable` before this step.
-buildCommand = "uv run python -c \"import cmdstanpy; cmdstanpy.install_cmdstan()\""
+# build.sh: uv sync → install CmdStan to /opt/cmdstan → pre-compile Stan binary.
+# The compiled binary is baked into the image so runtime never needs CmdStan.
+buildCommand = "bash build.sh"
 
 [deploy]
 startCommand = "uvicorn david.api.server:api --host 0.0.0.0 --port $PORT"

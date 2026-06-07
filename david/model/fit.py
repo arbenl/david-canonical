@@ -27,9 +27,40 @@ from ..config import (
 _COMPILED_MODEL: CmdStanModel | None = None
 
 
+def _ensure_cmdstan() -> None:
+    """Point cmdstanpy at /opt/cmdstan if no CmdStan is on the default path.
+
+    In Railway the binary is baked into the image at /opt/cmdstan/cmdstan-X.X.X.
+    Locally it sits in ~/.cmdstan (installed by `install_cmdstan`).
+    """
+    import os
+    from pathlib import Path as _P
+    if os.environ.get("CMDSTAN"):
+        return  # already set explicitly
+    # Check default location first
+    try:
+        from cmdstanpy.utils.cmdstan import cmdstan_path
+        cmdstan_path()
+        return  # default is fine
+    except ValueError:
+        pass
+    # Fall back to /opt/cmdstan (Railway image path)
+    opt = _P("/opt/cmdstan")
+    if opt.exists():
+        candidates = sorted(opt.glob("cmdstan-*"))
+        if candidates:
+            import cmdstanpy as _csp
+            _csp.set_cmdstan_path(str(candidates[-1]))
+            return
+    # Last resort: install on demand (slow first run, but never crashes)
+    import cmdstanpy as _csp
+    _csp.install_cmdstan()
+
+
 def _get_compiled_model() -> CmdStanModel:
     global _COMPILED_MODEL
     if _COMPILED_MODEL is None:
+        _ensure_cmdstan()
         _COMPILED_MODEL = CmdStanModel(stan_file=str(M01_FORWARD_STAN))
     return _COMPILED_MODEL
 
@@ -585,7 +616,7 @@ def run_fit(run_id: str | None = None) -> dict[str, Any]:
             "fit_dir": str(fit_dir),
         }
 
-    model = CmdStanModel(stan_file=str(M01_FORWARD_STAN))
+    model = _get_compiled_model()
     fit = model.sample(
         data=data,
         chains=MIN_CHAINS,
