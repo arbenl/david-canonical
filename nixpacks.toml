@@ -1,4 +1,5 @@
-# Nixpacks build configuration for Railway.
-# CmdStan requires gcc + make to compile Stan C++ models at build time.
+# Nixpacks build + runtime configuration for Railway.
+# aptPkgs are included in both the build image AND the final runtime container.
+# make + g++ are needed by CmdStan to compile Stan models → C++ binaries.
 [phases.setup]
-nixPkgs = ["gcc", "gnumake"]
+aptPkgs = ["make", "g++", "libstdc++-12-dev"]

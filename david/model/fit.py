@@ -28,33 +28,18 @@ _COMPILED_MODEL: CmdStanModel | None = None
 
 
 def _ensure_cmdstan() -> None:
-    """Point cmdstanpy at /opt/cmdstan if no CmdStan is on the default path.
+    """Install CmdStan if it is not already present.
 
-    In Railway the binary is baked into the image at /opt/cmdstan/cmdstan-X.X.X.
-    Locally it sits in ~/.cmdstan (installed by `install_cmdstan`).
+    Fast path: ~/.cmdstan exists (installed during build or a previous run).
+    Slow path: install_cmdstan() — downloads + compiles CmdStan (~10 min).
+               Requires make + g++, which nixpacks.toml guarantees via aptPkgs.
     """
-    import os
-    from pathlib import Path as _P
-    if os.environ.get("CMDSTAN"):
-        return  # already set explicitly
-    # Check default location first
     try:
         from cmdstanpy.utils.cmdstan import cmdstan_path
-        cmdstan_path()
-        return  # default is fine
+        cmdstan_path()   # raises ValueError if not installed
     except ValueError:
-        pass
-    # Fall back to /opt/cmdstan (Railway image path)
-    opt = _P("/opt/cmdstan")
-    if opt.exists():
-        candidates = sorted(opt.glob("cmdstan-*"))
-        if candidates:
-            import cmdstanpy as _csp
-            _csp.set_cmdstan_path(str(candidates[-1]))
-            return
-    # Last resort: install on demand (slow first run, but never crashes)
-    import cmdstanpy as _csp
-    _csp.install_cmdstan()
+        import cmdstanpy as _csp
+        _csp.install_cmdstan()
 
 
 def _get_compiled_model() -> CmdStanModel:
