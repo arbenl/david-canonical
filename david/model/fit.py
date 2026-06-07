@@ -27,14 +27,21 @@ from ..config import (
 _COMPILED_MODEL: CmdStanModel | None = None
 
 
+_CMDSTAN_VERSION = "2.39.0"
+# Direct tarball URL bypasses the GitHub API (60 req/hr anonymous rate limit).
+_CMDSTAN_URL = (
+    f"https://github.com/stan-dev/cmdstan/releases/download/"
+    f"v{_CMDSTAN_VERSION}/cmdstan-{_CMDSTAN_VERSION}.tar.gz"
+)
+
+
 def _ensure_cmdstan() -> None:
     """Install CmdStan (and build tools if missing) on first use.
 
     Fast path : ~/.cmdstan already present — returns immediately.
     Slow path : installs make + g++ via apt (if absent), then downloads
-                and compiles CmdStan (~10 min first time only).
+                cmdstan-2.39.0 via a pinned direct URL (no GitHub API call).
     """
-    import os
     import subprocess
 
     try:
@@ -48,13 +55,13 @@ def _ensure_cmdstan() -> None:
     if not _which("make"):
         print("[david] make not found — installing via apt…", flush=True)
         subprocess.run(
-            ["apt-get", "install", "-y", "-qq", "make", "g++"],
+            ["apt-get", "install", "-y", "-qq", "make", "g++", "libstdc++-12-dev"],
             check=False, capture_output=True,
         )
 
-    print("[david] Installing CmdStan (first run — ~10 min)…", flush=True)
+    print(f"[david] Installing CmdStan {_CMDSTAN_VERSION} (first run — ~10 min)…", flush=True)
     import cmdstanpy as _csp
-    _csp.install_cmdstan()
+    _csp.install_cmdstan(url=_CMDSTAN_URL, version=_CMDSTAN_VERSION)
 
 
 def _which(cmd: str) -> bool:
