@@ -28,7 +28,7 @@ _COMPILED_MODEL: CmdStanModel | None = None
 
 
 _CMDSTAN_VERSION = "2.39.0"
-# Direct tarball URL bypasses the GitHub API (60 req/hr anonymous rate limit).
+# Direct tarball URL — bypasses the GitHub API (60 req/hr anon rate limit).
 _CMDSTAN_URL = (
     f"https://github.com/stan-dev/cmdstan/releases/download/"
     f"v{_CMDSTAN_VERSION}/cmdstan-{_CMDSTAN_VERSION}.tar.gz"
@@ -38,11 +38,14 @@ _CMDSTAN_URL = (
 def _ensure_cmdstan() -> None:
     """Install CmdStan (and build tools if missing) on first use.
 
-    Fast path : ~/.cmdstan already present — returns immediately.
-    Slow path : installs make + g++ via apt (if absent), then downloads
-                cmdstan-2.39.0 via a pinned direct URL (no GitHub API call).
+    Fast path : ~/.cmdstan/cmdstan-{version} already present — returns immediately.
+    Slow path : downloads the tarball directly (no GitHub API call), extracts,
+                builds with make, then registers the path with cmdstanpy.
     """
     import subprocess
+    import tarfile
+    import urllib.request
+    from pathlib import Path
 
     try:
         from cmdstanpy.utils.cmdstan import cmdstan_path
@@ -51,7 +54,7 @@ def _ensure_cmdstan() -> None:
     except ValueError:
         pass
 
-    # Ensure the C++ build toolchain is present (needed by `make build`)
+    # Ensure the C++ build toolchain is present
     if not _which("make"):
         print("[david] make not found — installing via apt…", flush=True)
         subprocess.run(
@@ -59,9 +62,25 @@ def _ensure_cmdstan() -> None:
             check=False, capture_output=True,
         )
 
-    print(f"[david] Installing CmdStan {_CMDSTAN_VERSION} (first run — ~10 min)…", flush=True)
+    print(f"[david] Downloading CmdStan {_CMDSTAN_VERSION}…", flush=True)
+    tarball = Path(f"/tmp/cmdstan-{_CMDSTAN_VERSION}.tar.gz")
+    urllib.request.urlretrieve(_CMDSTAN_URL, tarball)
+
+    install_parent = Path.home() / ".cmdstan"
+    install_parent.mkdir(parents=True, exist_ok=True)
+    install_dir = install_parent / f"cmdstan-{_CMDSTAN_VERSION}"
+
+    print("[david] Extracting…", flush=True)
+    with tarfile.open(tarball, "r:gz") as tar:
+        tar.extractall(install_parent)
+
+    print("[david] Building CmdStan (make build — ~8 min)…", flush=True)
+    subprocess.run(["make", "build"], cwd=str(install_dir), check=True)
+
     import cmdstanpy as _csp
-    _csp.install_cmdstan(url=_CMDSTAN_URL, version=_CMDSTAN_VERSION)
+    _csp.set_cmdstan_path(str(install_dir))
+    print(f"[david] CmdStan ready at {install_dir}", flush=True)
+    tarball.unlink(missing_ok=True)
 
 
 def _which(cmd: str) -> bool:
