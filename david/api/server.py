@@ -27,7 +27,7 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -358,6 +358,67 @@ def list_forecast_cells(
         return {"run_id": run_id, "forecast_cells": cells, "n": len(cells)}
     except Exception as exc:
         return _db_error_503(exc)
+
+
+# ─── pipeline trigger endpoints ──────────────────────────────────────────────
+
+_PIPELINE_SECRET = os.environ.get("PIPELINE_SECRET", "")
+_pipeline_running = False   # simple in-process guard (single replica)
+
+
+def _run_pipeline_bg(since_days: int = 7) -> None:
+    """Run ingest → fit in background. Guarded against concurrent runs."""
+    global _pipeline_running
+    if _pipeline_running:
+        return
+    _pipeline_running = True
+    import subprocess
+    from datetime import date, timedelta
+    since = (date.today() - timedelta(days=since_days)).isoformat()
+    try:
+        subprocess.run(["david", "ingest", "--since", since],
+                       check=True, capture_output=True, text=True)
+        subprocess.run(["david", "fit"],
+                       capture_output=True, text=True)   # non-fatal if fit fails
+    except Exception as exc:
+        print(f"[pipeline] error: {exc}", flush=True)
+    finally:
+        _pipeline_running = False
+
+
+@api.post("/internal/pipeline/run")
+async def trigger_pipeline(
+    background_tasks: BackgroundTasks,
+    since_days: int = Query(7, ge=1, le=365),
+    authorization: str = Header(default=""),
+) -> dict:
+    """Trigger ingest → fit pipeline in the background.
+
+    Protected by PIPELINE_SECRET env var (Bearer token).
+    If PIPELINE_SECRET is empty the endpoint is open (dev mode).
+    """
+    if _PIPELINE_SECRET and authorization != f"Bearer {_PIPELINE_SECRET}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if _pipeline_running:
+        return {"status": "already_running",
+                "message": "Pipeline is already running, try again later."}
+    background_tasks.add_task(_run_pipeline_bg, since_days)
+    return {"status": "queued",
+            "message": f"Ingest (last {since_days}d) + fit started in background."}
+
+
+@api.get("/internal/pipeline/status")
+async def pipeline_status() -> dict:
+    """Last pipeline run status."""
+    try:
+        from ..db.repositories import get_fit_runs
+        runs = get_fit_runs(limit=1)
+        return {
+            "running": _pipeline_running,
+            "last_fit": runs[0] if runs else None,
+        }
+    except Exception as exc:
+        return {"running": _pipeline_running, "last_fit": None, "error": str(exc)}
 
 
 # ─── server entry point ───────────────────────────────────────────────────────

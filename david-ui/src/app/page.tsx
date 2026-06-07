@@ -1,5 +1,6 @@
 import { api } from "@/lib/api";
 import { StatCard } from "@/components/stat-card";
+import { PipelineButton } from "@/components/pipeline-button";
 import Link from "next/link";
 
 const statusColor: Record<string, string> = {
@@ -41,11 +42,14 @@ export default async function CommandCenter() {
             Pipeline status · {new Date().toLocaleDateString("en-GB", { dateStyle: "long" })}
           </p>
         </div>
-        <div className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium ${
-          apiOk ? "bg-emerald-950 text-emerald-300" : "bg-red-950 text-red-300"
-        }`}>
-          <span className={`h-1.5 w-1.5 rounded-full ${apiOk ? "bg-emerald-400" : "bg-red-400"}`} />
-          {apiOk ? "FastAPI connected" : "FastAPI unreachable"}
+        <div className="flex items-center gap-4">
+          <PipelineButton />
+          <div className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium ${
+            apiOk ? "bg-emerald-950 text-emerald-300" : "bg-red-950 text-red-300"
+          }`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${apiOk ? "bg-emerald-400" : "bg-red-400"}`} />
+            {apiOk ? "FastAPI connected" : "FastAPI unreachable"}
+          </div>
         </div>
       </div>
 
