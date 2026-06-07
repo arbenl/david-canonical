@@ -1,16 +1,133 @@
-"""News RSS / Atom scraper adapter.
-
-Skeleton example. Fill in the parsing and dedup logic per source.
-"""
+"""News RSS / Atom scraper adapter."""
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from typing import Iterator
 
 import feedparser
 
 from ..sources import RawEvidenceItem, Source
+
+# ── Country keyword tagger ─────────────────────────────────────────────────
+# Maps ISO-2 country code → regex pattern matching country name/demonym variants.
+# Ordered by specificity (longer/more-specific patterns first to avoid false matches).
+_COUNTRY_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    # Western Balkans — EU candidate countries (thesis focus)
+    ("XK", re.compile(
+        r"\b(Kosovo[av]?e?|Kosovar|Pristina|Prishtina|Prishtinë)\b", re.IGNORECASE
+    )),
+    ("MK", re.compile(
+        r"\b(North\s+Macedonia|N\.?\s*Macedonia|Macedoni[ao]|Macedonian|Maqedoni[ae]|"
+        r"Shkup|Skopje|VMRO)\b", re.IGNORECASE
+    )),
+    ("AL", re.compile(
+        r"\b(Albania[n]?|Shqipëri[a]?|Shqiperi[a]?|Albanian|Tirana|Tiranë)\b",
+        re.IGNORECASE
+    )),
+    ("RS", re.compile(
+        r"\b(Serbia[n]?|Srbija|Belgrade|Beograd|Novi\s+Sad)\b", re.IGNORECASE
+    )),
+    ("BA", re.compile(
+        r"\b(Bosnia[n]?|Herzegovina|Bosnian|Sarajevo|Mostar|Banja\s+Luka)\b",
+        re.IGNORECASE
+    )),
+    ("ME", re.compile(
+        r"\b(Montenegro[a-z]*|Montenegrin|Crna\s+Gora|Podgorica)\b", re.IGNORECASE
+    )),
+    # EU members — policy leaders/controls
+    ("NL", re.compile(
+        r"\b(Netherlands|Dutch|Holland|Nederland[s]?|Amsterdam|The\s+Hague|Den\s+Haag)\b",
+        re.IGNORECASE
+    )),
+    ("IE", re.compile(
+        r"\b(Ireland|Irish|Éire|Eire|Dublin)\b", re.IGNORECASE
+    )),
+    ("SE", re.compile(
+        r"\b(Sweden|Swedish|Sverige|Svensk[a]?|Stockholm|snus)\b", re.IGNORECASE
+    )),
+    ("TR", re.compile(
+        r"\b(Turkey|Turkish|Türkiye|Turkiye|Türk|Ankara|Istanbul|İstanbul)\b",
+        re.IGNORECASE
+    )),
+    # Other relevant EU / candidate states
+    ("HR", re.compile(r"\b(Croatia[n]?|Hrvatska|Zagreb)\b", re.IGNORECASE)),
+    ("SI", re.compile(r"\b(Slovenia[n]?|Slovenija|Ljubljana)\b", re.IGNORECASE)),
+    ("HU", re.compile(r"\b(Hungary|Hungarian|Magyarország|Budapest)\b", re.IGNORECASE)),
+    ("PL", re.compile(r"\b(Poland|Polish|Polska|Warsaw|Warszawa)\b", re.IGNORECASE)),
+    ("RO", re.compile(r"\b(Romania[n]?|România|Bucharest|București)\b", re.IGNORECASE)),
+    ("BG", re.compile(r"\b(Bulgaria[n]?|България|Sofia|Sofija)\b", re.IGNORECASE)),
+    ("DE", re.compile(r"\b(German[y]?|Deutschland|Berlin|Bundesrat|Bundestag)\b", re.IGNORECASE)),
+    ("FR", re.compile(r"\b(France|French|Français|Paris|Élysée)\b", re.IGNORECASE)),
+    ("GB", re.compile(r"\b(UK|United\s+Kingdom|Britain|British|England|London|Whitehall)\b", re.IGNORECASE)),
+]
+
+# ── Policy keyword tagger ──────────────────────────────────────────────────
+# Maps policy slug → regex; first match wins.
+_POLICY_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("novel_products", re.compile(
+        r"\b(nicotine\s+pouch|oral\s+nicotine|snus|e.?cigarette|vap(e|ing|or)|"
+        r"heated\s+tobacco|IQOS|HTP|heat.not.burn|ZYN|Lyft|Velo|Zyn|"
+        r"oral\s+tobacco|tobacco.free\s+pouch|pouche?s?\s+de\s+nicotine)\b",
+        re.IGNORECASE
+    )),
+    ("illicit_trade", re.compile(
+        r"\b(illicit\s+trad|smuggl|contraband|counterfeit|black\s+market|"
+        r"trafick|bootleg|tax.?stamp\s+fraud)\b",
+        re.IGNORECASE
+    )),
+    ("fctc_5_3", re.compile(
+        r"\b(FCTC|article\s+5\.3|5\.3|industry\s+interfer|tobacco\s+lobby|"
+        r"Philip\s+Morris|British\s+American\s+Tobacco|BAT\b|PMI\b|"
+        r"Japan\s+Tobacco|Imperial\s+Brands|conflict\s+of\s+interest|"
+        r"revolving\s+door|front\s+group|astroturf)\b",
+        re.IGNORECASE
+    )),
+    ("packaging", re.compile(
+        r"\b(plain\s+packag|standardi[sz]ed\s+packag|health\s+warning|"
+        r"graphic\s+warning|label|pictorial\s+warn)\b",
+        re.IGNORECASE
+    )),
+    ("marketing", re.compile(
+        r"\b(advertis|promot|sponsor|brand\s+display|point.of.sale|"
+        r"social\s+media\s+market|influencer|tobacco\s+ad)\b",
+        re.IGNORECASE
+    )),
+    ("smoke_free", re.compile(
+        r"\b(smoke.?free|smoking\s+ban|indoor\s+smok|public\s+place|"
+        r"bar\s+ban|restaurant\s+ban|hospitality\s+ban|secondhand\s+smoke|"
+        r"passive\s+smok|workplace\s+smok)\b",
+        re.IGNORECASE
+    )),
+    ("taxation", re.compile(
+        r"\b(excise|tobacco\s+tax|cigarette\s+tax|price\s+increas|"
+        r"tax\s+increase|affordab|fiscal\s+polic|duty\s+on\s+tobacco|"
+        r"tobacco\s+pric)\b",
+        re.IGNORECASE
+    )),
+]
+
+
+def _tag_country(text: str, coverage: list[str]) -> str:
+    """Return ISO-2 country code from article text, or coverage[0] as fallback."""
+    for iso, pattern in _COUNTRY_PATTERNS:
+        if iso in coverage or "GLOBAL" in coverage:
+            if pattern.search(text):
+                return iso
+    # fallback: first explicit non-GLOBAL entry in coverage
+    for c in coverage:
+        if c != "GLOBAL":
+            return c
+    return coverage[0] if coverage else "unknown"
+
+
+def _tag_policy(text: str) -> str:
+    """Return policy slug from article text, or 'general' if no match."""
+    for slug, pattern in _POLICY_PATTERNS:
+        if pattern.search(text):
+            return slug
+    return "general"
 
 
 class RssScraper:
@@ -28,19 +145,19 @@ class RssScraper:
                 continue
             if evidence_date > until:
                 continue
+            text = getattr(entry, "summary", entry.title)
+            combined = f"{entry.title} {text}"
+            country = _tag_country(combined, self.source.country_coverage)
+            policy = _tag_policy(combined)
             yield RawEvidenceItem(
                 source_id=self.source.source_id,
                 item_id=getattr(entry, "id", entry.link),
                 fetched_at=datetime.utcnow().isoformat() + "Z",
                 evidence_date=evidence_date.isoformat(),
-                country=self._country_from_entry(entry),
+                country=country,
                 language=getattr(entry, "language", "en"),
                 title=entry.title,
                 url=entry.link,
-                text=getattr(entry, "summary", entry.title),
-                metadata={"raw_id": getattr(entry, "id", None)},
+                text=text,
+                metadata={"raw_id": getattr(entry, "id", None), "policy_area": policy},
             )
-
-    def _country_from_entry(self, entry) -> str:
-        # TODO: implement country tagger; default to first country_coverage entry.
-        return self.source.country_coverage[0] if self.source.country_coverage else "unknown"

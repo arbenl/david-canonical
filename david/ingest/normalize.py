@@ -47,14 +47,42 @@ _COUNTRY_ALIASES: dict[str, str] = {
     "croatia": "HR", "hr": "HR", "hrv": "HR",
     # Slovenia
     "slovenia": "SI", "si": "SI", "svn": "SI",
+    # Netherlands — policy leader (nicotine pouch ban)
+    "netherlands": "NL", "nl": "NL", "nld": "NL", "dutch": "NL", "holland": "NL",
+    # Ireland — tobacco policy leader
+    "ireland": "IE", "ie": "IE", "irl": "IE", "irish": "IE",
+    # Sweden — snus exemption / novel products
+    "sweden": "SE", "se": "SE", "swe": "SE", "swedish": "SE",
+    # Turkey — large tobacco market, heavy industry lobbying
+    "turkey": "TR", "tr": "TR", "tur": "TR", "turkish": "TR",
+    # Other EU
+    "germany": "DE", "de": "DE", "deu": "DE",
+    "france": "FR", "fr": "FR", "fra": "FR",
+    "uk": "GB", "gb": "GB", "gbr": "GB", "united kingdom": "GB", "britain": "GB",
+    "poland": "PL", "pl": "PL", "pol": "PL",
+    "romania": "RO", "ro": "RO", "rou": "RO",
+    "bulgaria": "BG", "bg": "BG", "bgr": "BG",
+    "hungary": "HU", "hu": "HU", "hun": "HU",
     # EU-level
     "eu": "EU", "european union": "EU",
+    # global / catch-all
+    "global": "GL", "gl": "GL",
     # generic fallback
     "unknown": "ZZ", "": "ZZ",
 }
 
 # Canonical policy areas; map aliases to the registered vocabulary.
 _POLICY_ALIASES: dict[str, str] = {
+    # ── Tobacco-specific policies (DAVID/M0.1 core vocabulary) ──────────────
+    "novel_products": "novel_products",       # e-cigs, nicotine pouches, HTP, snus
+    "illicit_trade": "illicit_trade",         # smuggling, contraband, black market
+    "fctc_5_3": "fctc_5_3",                   # Art. 5.3 — industry interference / lobbying
+    "packaging": "packaging",                 # plain packaging, health warnings
+    "marketing": "marketing",                 # advertising, sponsorship, display bans
+    "smoke_free": "smoke_free",               # indoor smoking bans, public-place rules
+    "taxation": "taxation",                   # excise duty, tobacco price policy
+    "general": "general",                     # tobacco policy (no specific sub-domain)
+    # ── Legacy / broader governance vocabulary ───────────────────────────────
     "media freedom": "media_freedom",
     "media_freedom": "media_freedom",
     "press freedom": "media_freedom",
@@ -74,7 +102,7 @@ _POLICY_ALIASES: dict[str, str] = {
     "electoral integrity": "electoral_integrity",
     "electoral_integrity": "electoral_integrity",
 }
-_POLICY_DEFAULT = "unknown"
+_POLICY_DEFAULT = "general"
 
 # Observability score per tier (pre-registered in ARCHITECTURE.md §3.2)
 _TIER_TO_I_O: dict[int, float] = {0: 0.30, 1: 0.50, 2: 0.70, 3: 0.90}
