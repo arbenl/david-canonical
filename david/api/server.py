@@ -364,23 +364,38 @@ def list_forecast_cells(
 
 _PIPELINE_SECRET = os.environ.get("PIPELINE_SECRET", "")
 _pipeline_running = False   # simple in-process guard (single replica)
+_pipeline_step: str = ""    # human-readable current step for UI
+_pipeline_started_at: Optional[str] = None
 
 
-def _run_pipeline_bg(since_days: int = 7) -> None:
-    """Run ingest → fit in background. Guarded against concurrent runs."""
-    global _pipeline_running
+def _auth_check(authorization: str) -> None:
+    """Raise 401 if PIPELINE_SECRET is set and header doesn't match."""
+    if _PIPELINE_SECRET and authorization != f"Bearer {_PIPELINE_SECRET}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _run_pipeline_bg(since_days: int = 7, fit_only: bool = False) -> None:
+    """Run (ingest →) fit in background. Guarded against concurrent runs."""
+    global _pipeline_running, _pipeline_step, _pipeline_started_at
     if _pipeline_running:
         return
     _pipeline_running = True
     import subprocess
+    import datetime
     from datetime import date, timedelta
-    since = (date.today() - timedelta(days=since_days)).isoformat()
+    _pipeline_started_at = datetime.datetime.utcnow().isoformat() + "Z"
     try:
-        subprocess.run(["david", "ingest", "--since", since],
-                       check=True, capture_output=True, text=True)
+        if not fit_only:
+            _pipeline_step = "ingesting"
+            since = (date.today() - timedelta(days=since_days)).isoformat()
+            subprocess.run(["david", "ingest", "--since", since],
+                           check=True, capture_output=True, text=True)
+        _pipeline_step = "fitting"
         subprocess.run(["david", "fit"],
                        capture_output=True, text=True)   # non-fatal if fit fails
+        _pipeline_step = "done"
     except Exception as exc:
+        _pipeline_step = f"error: {exc}"
         print(f"[pipeline] error: {exc}", flush=True)
     finally:
         _pipeline_running = False
@@ -390,6 +405,7 @@ def _run_pipeline_bg(since_days: int = 7) -> None:
 async def trigger_pipeline(
     background_tasks: BackgroundTasks,
     since_days: int = Query(7, ge=1, le=365),
+    fit_only: bool = Query(False, description="Skip ingest; run only `david fit`"),
     authorization: str = Header(default=""),
 ) -> dict:
     """Trigger ingest → fit pipeline in the background.
@@ -397,28 +413,42 @@ async def trigger_pipeline(
     Protected by PIPELINE_SECRET env var (Bearer token).
     If PIPELINE_SECRET is empty the endpoint is open (dev mode).
     """
-    if _PIPELINE_SECRET and authorization != f"Bearer {_PIPELINE_SECRET}":
-        raise HTTPException(status_code=401, detail="Unauthorized")
+    _auth_check(authorization)
     if _pipeline_running:
         return {"status": "already_running",
-                "message": "Pipeline is already running, try again later."}
-    background_tasks.add_task(_run_pipeline_bg, since_days)
+                "message": "Pipeline is already running, try again later.",
+                "step": _pipeline_step}
+    background_tasks.add_task(_run_pipeline_bg, since_days, fit_only)
+    if fit_only:
+        return {"status": "queued", "message": "Fit-only job started in background."}
     return {"status": "queued",
             "message": f"Ingest (last {since_days}d) + fit started in background."}
 
 
 @api.get("/internal/pipeline/status")
 async def pipeline_status() -> dict:
-    """Last pipeline run status."""
+    """Live pipeline status + evidence counts + last fit result."""
+    import datetime
+    base: dict = {
+        "running": _pipeline_running,
+        "step": _pipeline_step,
+        "started_at": _pipeline_started_at,
+        "polled_at": datetime.datetime.utcnow().isoformat() + "Z",
+    }
     try:
         from ..db.repositories import get_fit_runs
+        from ..db.connection import get_conn
         runs = get_fit_runs(limit=1)
-        return {
-            "running": _pipeline_running,
-            "last_fit": runs[0] if runs else None,
-        }
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM evidence_items")
+                n_evidence = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) FROM evidence_items WHERE adjudicated")
+                n_adjudicated = cur.fetchone()[0]
+        return {**base, "last_fit": runs[0] if runs else None,
+                "n_evidence": n_evidence, "n_adjudicated": n_adjudicated}
     except Exception as exc:
-        return {"running": _pipeline_running, "last_fit": None, "error": str(exc)}
+        return {**base, "last_fit": None, "error": str(exc)}
 
 
 # ─── server entry point ───────────────────────────────────────────────────────

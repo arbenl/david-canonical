@@ -7,10 +7,14 @@ const SECRET  = process.env.PIPELINE_SECRET ?? "";
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const sinceDays: number = body.since_days ?? 7;
+  const fitOnly: boolean  = body.fit_only   ?? false;
+
+  const params = new URLSearchParams({ since_days: String(sinceDays) });
+  if (fitOnly) params.set("fit_only", "true");
 
   try {
     const res = await fetch(
-      `${RAILWAY}/internal/pipeline/run?since_days=${sinceDays}`,
+      `${RAILWAY}/internal/pipeline/run?${params}`,
       {
         method: "POST",
         headers: {

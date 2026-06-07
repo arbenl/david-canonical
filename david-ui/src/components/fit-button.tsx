@@ -4,7 +4,8 @@ import { useState } from "react";
 
 type Status = "idle" | "running" | "done" | "error";
 
-export function PipelineButton() {
+/** Triggers only the Bayesian fit step (skips ingest). */
+export function FitButton() {
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState("");
 
@@ -15,33 +16,35 @@ export function PipelineButton() {
       const res = await fetch("/api/pipeline", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ since_days: 7 }),
+        body: JSON.stringify({ fit_only: true }),
       });
       const data = await res.json();
       if (res.ok) {
         setStatus("done");
-        setMessage(data.message ?? "Pipeline started.");
+        setMessage(data.message ?? "Fit started.");
       } else {
         setStatus("error");
-        setMessage(data.error ?? "Error triggering pipeline.");
+        setMessage(data.error ?? "Error triggering fit.");
       }
     } catch (err) {
       setStatus("error");
       setMessage(String(err));
     }
-    // reset after 6s
-    setTimeout(() => { setStatus("idle"); setMessage(""); }, 6000);
+    setTimeout(() => {
+      setStatus("idle");
+      setMessage("");
+    }, 6000);
   }
 
   const labels: Record<Status, string> = {
-    idle:    "▶ Run Pipeline",
+    idle:    "⚙ Run Fit",
     running: "⏳ Running…",
-    done:    "✓ Started",
+    done:    "✓ Queued",
     error:   "✗ Error",
   };
 
   const colors: Record<Status, string> = {
-    idle:    "bg-indigo-600 hover:bg-indigo-500 text-white",
+    idle:    "bg-slate-700 hover:bg-slate-600 text-slate-200",
     running: "bg-slate-600 text-slate-300 cursor-not-allowed",
     done:    "bg-emerald-700 text-emerald-100",
     error:   "bg-red-700 text-red-100",
@@ -52,8 +55,8 @@ export function PipelineButton() {
       <button
         onClick={run}
         disabled={status === "running"}
-        title="Scrape all RSS sources → LLM-code tobacco articles → run Bayesian fit"
-        className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${colors[status]}`}
+        title="Re-run Bayesian fit only — no new scraping"
+        className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${colors[status]}`}
       >
         {labels[status]}
       </button>
