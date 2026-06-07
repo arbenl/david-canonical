@@ -6,7 +6,21 @@ import os
 from pathlib import Path
 
 # Roots
-ROOT = Path(os.environ.get("DAVID_ROOT", Path(__file__).resolve().parents[1]))
+def _find_root() -> Path:
+    """Locate project root regardless of install mode (editable vs non-editable).
+
+    When installed non-editable (e.g. Railway `uv sync --no-editable`),
+    __file__ lives inside site-packages, not the source tree. Walk up until
+    pyproject.toml is found; fall back to /app (Railway convention).
+    """
+    candidate = Path(__file__).resolve().parent
+    for _ in range(8):
+        if (candidate / "pyproject.toml").exists():
+            return candidate
+        candidate = candidate.parent
+    return Path("/app")
+
+ROOT = Path(os.environ.get("DAVID_ROOT", "")) or _find_root()
 DATA_ROOT = Path(os.environ.get("DAVID_DATA_ROOT", ROOT / "data"))
 STAN_ROOT = ROOT / "stan"
 CONFIG_ROOT = ROOT / "config"
