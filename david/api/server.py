@@ -494,6 +494,130 @@ async def pipeline_status() -> dict:
         return {**base, "last_fit": None, "error": str(exc)}
 
 
+# ─── SBC + Forecast trigger endpoints ────────────────────────────────────────
+
+_sbc_running = False
+_sbc_step: str = ""
+_sbc_started_at: Optional[str] = None
+_sbc_result: Optional[dict] = None
+
+_forecast_running = False
+_forecast_step: str = ""
+_forecast_started_at: Optional[str] = None
+_forecast_result: Optional[dict] = None
+
+
+def _run_sbc_bg(n_worlds: int = 200, forecast_sbc: bool = False) -> None:
+    """Run SBC in background."""
+    global _sbc_running, _sbc_step, _sbc_started_at, _sbc_result
+    import datetime
+    import subprocess
+    _sbc_started_at = datetime.datetime.utcnow().isoformat() + "Z"
+    _sbc_running = True
+    _sbc_step = "running"
+    try:
+        cmd = ["david", "sbc", "--n-worlds", str(n_worlds)]
+        if forecast_sbc:
+            cmd.append("--forecast")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        _sbc_step = "done"
+        _sbc_result = {
+            "returncode": result.returncode,
+            "stdout": result.stdout[-4000:] if result.stdout else "",
+            "stderr": result.stderr[-2000:] if result.stderr else "",
+            "gate_status": "pass" if result.returncode == 0 else "fail",
+        }
+    except Exception as exc:
+        _sbc_step = f"error: {exc}"
+        _sbc_result = {"gate_status": "error", "reason": str(exc)}
+    finally:
+        _sbc_running = False
+
+
+def _run_forecast_bg(horizon: int = 6) -> None:
+    """Run forecast + route in background."""
+    global _forecast_running, _forecast_step, _forecast_started_at, _forecast_result
+    import datetime
+    import subprocess
+    _forecast_started_at = datetime.datetime.utcnow().isoformat() + "Z"
+    _forecast_running = True
+    try:
+        _forecast_step = "forecasting"
+        f_result = subprocess.run(
+            ["david", "forecast", "--horizon", str(horizon)],
+            capture_output=True, text=True,
+        )
+        _forecast_step = "routing"
+        r_result = subprocess.run(
+            ["david", "route"],
+            capture_output=True, text=True,
+        )
+        _forecast_step = "done"
+        _forecast_result = {
+            "gate_status": "pass" if f_result.returncode == 0 else "fail",
+            "forecast_returncode": f_result.returncode,
+            "route_returncode": r_result.returncode,
+            "forecast_stdout": f_result.stdout[-2000:] if f_result.stdout else "",
+            "route_stdout": r_result.stdout[-2000:] if r_result.stdout else "",
+        }
+    except Exception as exc:
+        _forecast_step = f"error: {exc}"
+        _forecast_result = {"gate_status": "error", "reason": str(exc)}
+    finally:
+        _forecast_running = False
+
+
+@api.post("/internal/sbc/run")
+async def trigger_sbc(
+    background_tasks: BackgroundTasks,
+    n_worlds: int = Query(200),
+    forecast_sbc: bool = Query(False),
+    authorization: str = Header(default=""),
+) -> dict:
+    """Run simulation-based calibration in the background."""
+    _auth_check(authorization)
+    if _sbc_running:
+        return {"status": "already_running", "step": _sbc_step}
+    background_tasks.add_task(_run_sbc_bg, n_worlds, forecast_sbc)
+    return {"status": "queued", "message": f"SBC started (n_worlds={n_worlds}, forecast={forecast_sbc})"}
+
+
+@api.get("/internal/sbc/status")
+async def sbc_status() -> dict:
+    """SBC run status."""
+    return {
+        "running": _sbc_running,
+        "step": _sbc_step,
+        "started_at": _sbc_started_at,
+        "result": _sbc_result,
+    }
+
+
+@api.post("/internal/forecast/run")
+async def trigger_forecast(
+    background_tasks: BackgroundTasks,
+    horizon: int = Query(6),
+    authorization: str = Header(default=""),
+) -> dict:
+    """Run forecast + route in the background."""
+    _auth_check(authorization)
+    if _forecast_running:
+        return {"status": "already_running", "step": _forecast_step}
+    background_tasks.add_task(_run_forecast_bg, horizon)
+    return {"status": "queued", "message": f"Forecast+route started (horizon={horizon}m)"}
+
+
+@api.get("/internal/forecast/status")
+async def forecast_run_status() -> dict:
+    """Forecast run status."""
+    return {
+        "running": _forecast_running,
+        "step": _forecast_step,
+        "started_at": _forecast_started_at,
+        "result": _forecast_result,
+    }
+
+
 # ─── human adjudication ──────────────────────────────────────────────────────
 
 from fastapi import Body
