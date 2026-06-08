@@ -8,7 +8,10 @@ const BASE =
     : "/api";
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { next: { revalidate: 30 } });
+  // Fail-closed surface: gate / SBC / forecast reads must reflect backend truth
+  // immediately. Caching (even 30s) could leave a locked stratum showing as
+  // unlocked after the backend flips a gate to "fail". Always fetch fresh.
+  const res = await fetch(`${BASE}${path}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`API ${path} → ${res.status}`);
   return res.json() as Promise<T>;
 }
