@@ -21,18 +21,18 @@ const legacy: NavLink[] = [
   { href: "/validate", label: "Validation",         icon: "✦" },
 ];
 
-function NavItem({ l, active }: { l: NavLink; active: boolean }) {
+function NavItem({ link, active }: { link: NavLink; active: boolean }) {
   return (
     <Link
-      href={l.href}
+      href={link.href}
       className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
         active
           ? "bg-sky-950 text-sky-300 font-medium ring-1 ring-sky-500/30"
           : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
       }`}
     >
-      <span className="text-base leading-none">{l.icon}</span>
-      {l.label}
+      <span className="text-base leading-none">{link.icon}</span>
+      {link.label}
     </Link>
   );
 }
@@ -49,15 +49,15 @@ export function Nav() {
       </div>
 
       <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5">
-        {primary.map((l) => (
-          <NavItem key={l.href} l={l} active={isActive(l.href)} />
+        {primary.map((link) => (
+          <NavItem key={link.href} link={link} active={isActive(link.href)} />
         ))}
 
         <p className="px-3 pt-5 pb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-600">
           Analyst tools
         </p>
-        {legacy.map((l) => (
-          <NavItem key={l.href} l={l} active={isActive(l.href)} />
+        {legacy.map((link) => (
+          <NavItem key={link.href} link={link} active={isActive(link.href)} />
         ))}
       </nav>
 

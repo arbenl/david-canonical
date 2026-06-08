@@ -67,10 +67,10 @@ export default async function ForecastRouterPage() {
     ]);
     if (summaryRes.status === "fulfilled") {
       const th = summaryRes.value.theorems ?? {};
-      aPrime = String((th["A_prime"] as Record<string, unknown>)?.gate_status ?? "skip");
-      bPrime = String((th["B_prime"] as Record<string, unknown>)?.gate_status ?? "skip");
-      const dPrime = (th["D_prime"] as Record<string, unknown>) ?? {};
-      const hs = dPrime["h_star_months"];
+      const theorem = (k: string) => (th[k] as Record<string, unknown> | undefined) ?? {};
+      aPrime = String(theorem("A_prime").gate_status ?? "skip");
+      bPrime = String(theorem("B_prime").gate_status ?? "skip");
+      const hs = theorem("D_prime").h_star_months;
       if (typeof hs === "number") hStar = hs;
     }
     if (cellsRes.status === "fulfilled") {

@@ -91,6 +91,9 @@ const STATUS_FILL: Record<NodeStatus, string> = {
   pass: "rgba(52,211,153,0.10)", fail: "rgba(248,113,113,0.10)",
   active: "rgba(34,211,238,0.10)", pending: "rgba(15,23,42,0.6)",
 };
+const STATUS_LABEL: Record<NodeStatus, string> = {
+  pass: "kaluar", fail: "dështoi", active: "aktiv", pending: "në pritje",
+};
 
 function nodeCenter(n: NodeDef) { return { cx: n.x + NW / 2, cy: n.y + NH / 2 }; }
 
@@ -135,7 +138,15 @@ export function RoadmapDiagram({ statuses }: { statuses: RoadmapStatuses }) {
             const st = statuses[n.id];
             const active = selected === n.id;
             return (
-              <g key={n.id} onClick={() => setSelected(n.id)} style={{ cursor: "pointer" }}>
+              <g
+                key={n.id}
+                role="button"
+                tabIndex={0}
+                aria-label={`${n.title} — ${STATUS_LABEL[st]}`}
+                onClick={() => setSelected(n.id)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(n.id); } }}
+                style={{ cursor: "pointer" }}
+              >
                 <rect
                   x={n.x} y={n.y} width={NW} height={NH} rx={12}
                   fill={STATUS_FILL[st]} stroke={STATUS_STROKE[st]}
@@ -160,7 +171,7 @@ export function RoadmapDiagram({ statuses }: { statuses: RoadmapStatuses }) {
         {(["pass", "active", "pending", "fail"] as NodeStatus[]).map((s) => (
           <span key={s} className="flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 rounded-full" style={{ background: STATUS_STROKE[s] }} />
-            {s === "pass" ? "kaluar" : s === "fail" ? "dështoi" : s === "active" ? "aktiv" : "në pritje"}
+            {STATUS_LABEL[s]}
           </span>
         ))}
         <span className="text-slate-600">· Kliko çdo nyje për detaje</span>

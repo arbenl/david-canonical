@@ -3,8 +3,41 @@ import { RoadmapDiagram, type NodeStatus, type RoadmapStatuses } from "@/compone
 
 export const dynamic = "force-dynamic";
 
+const PASS = "pass";
+const FAIL = "fail";
+
+/** Map a raw gate_status string onto a node status (pass / fail / pending). */
 function gate(v: unknown): NodeStatus {
-  return v === "pass" ? "pass" : v === "fail" ? "fail" : "pending";
+  if (v === PASS) return "pass";
+  if (v === FAIL) return "fail";
+  return "pending";
+}
+
+/** Pipeline step: done → pass, else optional active, else pending. */
+function step(done: boolean, active = false): NodeStatus {
+  if (done) return "pass";
+  return active ? "active" : "pending";
+}
+
+/** Combine two gate statuses; `both` requires both to pass, else any-pass suffices. */
+function combine(a: unknown, b: unknown, hasRun: boolean, requireBoth: boolean): NodeStatus {
+  if (a === FAIL || b === FAIL) return "fail";
+  const passed = requireBoth ? a === PASS && b === PASS : a === PASS || b === PASS;
+  if (passed) return "pass";
+  return hasRun ? "active" : "pending";
+}
+
+function routerStatusOf(theorem: NodeStatus, sbc: NodeStatus): NodeStatus {
+  if (theorem === "pass" && sbc === "pass") return "pass";
+  if (theorem === "fail" || sbc === "fail") return "fail";
+  return "pending";
+}
+
+async function fetchTheoremGates(runId: string): Promise<{ aPrime: unknown; bPrime: unknown }> {
+  const summary = await api.fitRun(runId).catch(() => null);
+  const th = summary?.theorems ?? {};
+  const read = (k: string) => (th[k] as Record<string, unknown>)?.gate_status;
+  return { aPrime: read("A_prime"), bPrime: read("B_prime") };
 }
 
 export default async function RoadmapPage() {
@@ -17,41 +50,26 @@ export default async function RoadmapPage() {
   const strata    = strataRes.status === "fulfilled" ? strataRes.value.strata : [];
   const latestRun = runsRes.status   === "fulfilled" ? runsRes.value.fit_runs?.[0] : null;
   const sbc       = sbcRes.status    === "fulfilled" ? sbcRes.value : null;
+  const hasRun    = !!latestRun;
 
   const totalEvidence    = strata.reduce((s, x) => s + x.n_evidence, 0);
   const totalAdjudicated = strata.reduce((s, x) => s + x.n_adjudicated, 0);
 
-  let aPrime: unknown = "pending", bPrime: unknown = "pending";
-  if (latestRun) {
-    const summary = await api.fitRun(latestRun.run_id).catch(() => null);
-    const th = summary?.theorems ?? {};
-    aPrime = (th["A_prime"] as Record<string, unknown>)?.gate_status;
-    bPrime = (th["B_prime"] as Record<string, unknown>)?.gate_status;
-  }
+  const { aPrime, bPrime } = latestRun
+    ? await fetchTheoremGates(latestRun.run_id)
+    : { aPrime: undefined, bPrime: undefined };
 
-  const theoremStatus: NodeStatus =
-    aPrime === "fail" || bPrime === "fail" ? "fail"
-    : aPrime === "pass" && bPrime === "pass" ? "pass"
-    : latestRun ? "active" : "pending";
-
-  const sbcStatus: NodeStatus =
-    sbc?.measurement?.gate_status === "fail" || sbc?.forecast?.gate_status === "fail" ? "fail"
-    : sbc?.measurement?.gate_status === "pass" || sbc?.forecast?.gate_status === "pass" ? "pass"
-    : latestRun ? "active" : "pending";
-
-  const routerStatus: NodeStatus =
-    theoremStatus === "pass" && sbcStatus === "pass" ? "pass"
-    : theoremStatus === "fail" || sbcStatus === "fail" ? "fail"
-    : "pending";
+  const theoremStatus = combine(aPrime, bPrime, hasRun, true);
+  const sbcStatus = combine(sbc?.measurement?.gate_status, sbc?.forecast?.gate_status, hasRun, false);
 
   const statuses: RoadmapStatuses = {
-    sources:    strata.length > 0 ? "pass" : "pending",
-    coding:     totalEvidence > 0 ? "pass" : "pending",
-    adjudicate: totalAdjudicated > 0 ? "pass" : totalEvidence > 0 ? "active" : "pending",
+    sources:    step(strata.length > 0),
+    coding:     step(totalEvidence > 0),
+    adjudicate: step(totalAdjudicated > 0, totalEvidence > 0),
     fit:        latestRun ? gate(latestRun.gate_status) : "pending",
     theorems:   theoremStatus,
     sbc:        sbcStatus,
-    router:     routerStatus,
+    router:     routerStatusOf(theoremStatus, sbcStatus),
   };
 
   return (

@@ -18,25 +18,28 @@ interface Props {
  * Place inside a `relative` container; it pins to the top-right corner by default.
  * Hovering reveals a rigorous Albanian tooltip card.
  */
+const CARD_POS: Record<NonNullable<Props["side"]>, string> = {
+  left:   "right-6 top-1/2 -translate-y-1/2",
+  top:    "bottom-6 left-1/2 -translate-x-1/2",
+  bottom: "top-6 left-1/2 -translate-x-1/2",
+  right:  "left-6 top-1/2 -translate-y-1/2",
+};
+
 export function ExplainDot({ title, body, formula, side = "right" }: Props) {
   const [open, setOpen] = useState(false);
-
-  const cardPos =
-    side === "left"
-      ? "right-6 top-1/2 -translate-y-1/2"
-      : side === "top"
-      ? "bottom-6 left-1/2 -translate-x-1/2"
-      : side === "bottom"
-      ? "top-6 left-1/2 -translate-x-1/2"
-      : "left-6 top-1/2 -translate-y-1/2";
+  const cardPos = CARD_POS[side];
 
   return (
-    <span
-      className="absolute right-3 top-3 z-30"
+    <button
+      type="button"
+      aria-label={title}
+      className="absolute right-3 top-3 z-30 cursor-help bg-transparent p-0"
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onBlur={() => setOpen(false)}
     >
-      <span className="relative flex h-3 w-3 cursor-help">
+      <span className="relative flex h-3 w-3">
         <span className="explain-ring absolute inline-flex h-full w-full rounded-full" />
         <span className="relative inline-flex h-3 w-3 rounded-full bg-sky-400 ring-2 ring-sky-300/40" />
       </span>
@@ -59,6 +62,6 @@ export function ExplainDot({ title, body, formula, side = "right" }: Props) {
           )}
         </span>
       )}
-    </span>
+    </button>
   );
 }

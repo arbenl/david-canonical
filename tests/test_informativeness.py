@@ -42,19 +42,19 @@ def test_informativeness_shape_mismatch_raises():
 
 # ── B'.1 Bayes classification error = (1 - I) / 2 ─────────────────────────────
 
-@pytest.mark.parametrize("I,expected", [
+@pytest.mark.parametrize("info,expected", [
     (0.0, 0.5),    # uninformative channel → chance-level error
     (1.0, 0.0),    # perfect channel → zero error
     (0.5, 0.25),
     (0.8, 0.10),
 ])
-def test_bayes_error_identity(I, expected):
-    assert bayes_classification_error(I) == pytest.approx(expected)
+def test_bayes_error_identity(info, expected):
+    assert bayes_classification_error(info) == pytest.approx(expected)
 
 
-def test_bayes_error_monotone_decreasing_in_I():
-    Is = np.linspace(0.0, 1.0, 11)
-    errs = [bayes_classification_error(float(i)) for i in Is]
+def test_bayes_error_monotone_decreasing():
+    grid = np.linspace(0.0, 1.0, 11)
+    errs = [bayes_classification_error(float(x)) for x in grid]
     assert all(a >= b for a, b in zip(errs, errs[1:]))
 
 

@@ -291,253 +291,320 @@ function CardShell({ title, children, explain }: {
    Main component
 ──────────────────────────────────────────────────────────────────────────── */
 
+/* ── status / message constants (dedupe repeated literals) ────────────────── */
+const ROUTER_ID = "router";
+const MSG_SBC_LOCK = "Motori i bllokuar: Modeli nuk është i kalibruar matematikisht lokalisht.";
+const MSG_THEOREM_BANNER = "Disa stratume janë të bllokuara nga teoremat. Shih kurbën më poshtë.";
+
+const EXPLAIN_CURRENT = {
+  title: "Probabiliteti Aktual",
+  body: "Probabiliteti posterior i agreguar nga koduesit e pavarur LLM nëpërmjet modelit Dawid-Skene, i cili korrigjon për saktësinë (sensitivitet/specificitet) e secilit burim përpara se t'i bashkojë vlerësimet.",
+  formula: "P(aktiv | të dhënat) = ∫ θ · p(θ|y) dθ",
+};
+const EXPLAIN_CI = {
+  side: "left" as const,
+  title: "Intervalet e Besueshmërisë",
+  body: "Brezat tregojnë pasigurinë prior→posterior të vlerësuar nga zinxhirët MCMC. Brezi 80% dhe 95% janë intervale të besueshmërisë Bayesiane: me probabilitet 95% vlera e vërtetë ndodhet brenda brezit të jashtëm.",
+  formula: "CI₉₅ = [Q₀.₀₂₅(θ|y), Q₀.₉₇₅(θ|y)]",
+};
+const EXPLAIN_REGIME = {
+  side: "left" as const,
+  title: "Shpërndarja e Regjimeve",
+  body: "Klasat latente të modelit hartohen në taktikat e ndërhyrjes së industrisë së duhanit: Bullish↔ofensivë SIO, Bearish↔presion CSIO, Volatile↔MIO oportuniste, Stable↔periudha pa ndërhyrje.",
+  formula: "z_t ~ Categorical(π),  Σπ = 1",
+};
+const EXPLAIN_ROUTING = {
+  side: "left" as const,
+  title: "Statusi i Rrugëzimit / Teoremat",
+  body: "Rrugëzuesi kombinon dy motorë. Parashikimet zhbllokohen vetëm kur stratumi ka ≥ 3 burime strukturalisht të pavarura (Teorema A′) — kjo garanton identifikueshmëri dhe pengon kapjen nga një burim i vetëm.",
+  formula: "A′:  #{burime të pavarura} ≥ 3",
+};
+
+function gateChipClass(status: string): string {
+  return status === "pass" ? "bg-emerald-950/60 text-emerald-300" : "bg-red-950/60 text-red-300";
+}
+
+/** Inject live data into the "router" model; the others stay illustrative. */
+function buildModels(realCurve: CurvePoint[] | null, realProbability: number | null): ModelData[] {
+  return BASE_MODELS.map((m) => {
+    if (m.id !== ROUTER_ID) return m;
+    const curve = realCurve && realCurve.length > 1 ? realCurve : m.curve;
+    const probability = realProbability != null ? realProbability * 100 : m.probability;
+    const direction: "up" | "down" = probability >= 50 ? "up" : "down";
+    return { ...m, curve, probability, direction };
+  });
+}
+
+/* ── sub-components ───────────────────────────────────────────────────────── */
+
+function RouterHeader({ updatedAgo, usingMock, explain, onToggle }: {
+  updatedAgo: string; usingMock: boolean; explain: boolean; onToggle: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-white">
+          FORECAST ROUTER <span className="text-slate-600">|</span>{" "}
+          <span className="text-base font-medium text-slate-400">Performance Analytics &amp; Regime Allocation</span>
+        </h1>
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-700/40 bg-emerald-950/30 px-2.5 py-1 text-emerald-300">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 dot-live text-emerald-400 animate-pulse" />
+            AI Engine Active
+          </span>
+          <span className="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-slate-400">
+            Data Updated: {updatedAgo}
+          </span>
+          <span className="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-slate-400">
+            Confidence: <span className="text-cyan-300">High</span>
+          </span>
+          {usingMock && (
+            <span className="rounded-full border border-amber-700/40 bg-amber-950/20 px-2.5 py-1 text-amber-300">
+              demo data (backend empty)
+            </span>
+          )}
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-pressed={explain}
+        className={`inline-flex items-center gap-2 rounded-lg border px-3.5 py-2 text-sm font-medium transition-all ${
+          explain
+            ? "border-sky-400/60 bg-sky-950/50 text-sky-200 glow-cyan"
+            : "border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200"
+        }`}
+      >
+        🇦🇱 Shpjegimi
+        <span className={`text-[10px] uppercase ${explain ? "text-sky-300" : "text-slate-600"}`}>
+          {explain ? "Aktiv" : "Joaktiv"}
+        </span>
+      </button>
+    </div>
+  );
+}
+
+function TrustBanner({ certified, sbcFail }: { certified: boolean; sbcFail: boolean }) {
+  if (certified) {
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-emerald-700/50 bg-emerald-950/30 px-4 py-2.5 text-sm font-medium text-emerald-300 glow-emerald">
+        🛡️ Parashikim i Certifikuar Matematikisht (SBC &amp; Theorem A′ Passed)
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 rounded-xl border border-red-700/50 bg-red-950/30 px-4 py-2.5 text-sm font-medium text-red-300">
+      ⛔ {sbcFail ? MSG_SBC_LOCK : MSG_THEOREM_BANNER}
+    </div>
+  );
+}
+
+function ModelSelector({ models, activeId, onSelect, activeStratum, runId }: {
+  models: ModelData[]; activeId: string; onSelect: (id: string) => void;
+  activeStratum: string; runId: string | null;
+}) {
+  return (
+    <div className="flex shrink-0 flex-row gap-2 lg:w-52 lg:flex-col">
+      <p className="hidden text-[11px] font-semibold uppercase tracking-wider text-slate-600 lg:block">Models</p>
+      {models.map((m) => {
+        const active = m.id === activeId;
+        return (
+          <button
+            key={m.id}
+            onClick={() => onSelect(m.id)}
+            className={`flex-1 rounded-lg border px-3 py-2.5 text-left text-sm transition-all lg:flex-none ${
+              active
+                ? "border-cyan-400/60 bg-cyan-950/30 text-cyan-200 glow-cyan"
+                : "border-slate-800 bg-slate-900/50 text-slate-400 hover:border-slate-600 hover:text-slate-200"
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full" style={{ background: m.accent, boxShadow: active ? `0 0 8px ${m.accent}` : "none" }} />
+              {m.name}
+            </span>
+          </button>
+        );
+      })}
+      <div className="mt-2 hidden rounded-lg border border-slate-800 bg-slate-900/40 p-3 text-[10px] leading-relaxed text-slate-500 lg:block">
+        Stratum aktiv: <span className="font-mono text-slate-300">{activeStratum}</span>
+        {runId && (
+          <>
+            <br />Run: <span className="font-mono text-slate-400">{runId.slice(0, 14)}…</span>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CalibrationLock() {
+  return (
+    <div className="absolute inset-0 z-40 flex items-center justify-center rounded-xl bg-[#020617]/85 backdrop-blur-sm">
+      <div className="max-w-sm rounded-xl border border-red-700/50 bg-red-950/40 p-5 text-center">
+        <p className="text-3xl">🔒</p>
+        <p className="mt-2 text-sm font-semibold text-red-200">{MSG_SBC_LOCK}</p>
+        <p className="mt-2 text-xs text-red-300/70">
+          SBC (Simulation-Based Calibration) ka statusin <b>fail</b>. Rikalibroni modelin para se të parashikoni.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function CurrentProbabilitiesCard({ model, explain }: { model: ModelData; explain: boolean }) {
+  const up = model.direction === "up";
+  return (
+    <CardShell title="Current Probabilities" explain={explain ? EXPLAIN_CURRENT : undefined}>
+      <div className="flex items-end gap-2">
+        <span className={`text-4xl font-bold ${up ? "text-emerald-400 neon-green" : "text-red-400 neon-rose"}`}>
+          {model.probability.toFixed(1)}%
+        </span>
+        <span className={`mb-1 text-xl ${up ? "text-emerald-400" : "text-red-400"}`}>{up ? "↑" : "↓"}</span>
+      </div>
+      <div className="mt-4 space-y-2 text-xs">
+        <div className="flex justify-between">
+          <span className="text-slate-500">Expected Return</span>
+          <span className={`font-mono ${model.expectedReturn >= 0 ? "text-emerald-300" : "text-red-300"}`}>
+            {model.expectedReturn >= 0 ? "+" : ""}{model.expectedReturn.toFixed(1)}%
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-slate-500">Risk Score</span>
+          <span className="font-mono text-amber-300">{model.riskScore}/100</span>
+        </div>
+      </div>
+    </CardShell>
+  );
+}
+
+function ForecastChartCard({ model, explain, theoremFail, sbcFail, hStar }: {
+  model: ModelData; explain: boolean; theoremFail: boolean; sbcFail: boolean; hStar: number | null;
+}) {
+  return (
+    <div className="card-premium relative p-4 md:col-span-1 xl:col-span-2">
+      {explain && <ExplainDot {...EXPLAIN_CI} />}
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Forecast Probabilities</p>
+        <div className="flex gap-3 text-[10px] text-slate-500">
+          <span className="flex items-center gap-1"><span className="inline-block h-2 w-3 rounded" style={{ background: model.accent, opacity: 0.5 }} /> 80% CI</span>
+          <span className="flex items-center gap-1"><span className="inline-block h-2 w-3 rounded" style={{ background: model.accent, opacity: 0.18 }} /> 95% CI</span>
+        </div>
+      </div>
+      <div className="relative h-44">
+        <ForecastAreaChart curve={model.curve} accent={model.accent} />
+        {theoremFail && !sbcFail && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center rounded-lg bg-[#020617]/90 backdrop-blur-sm">
+            <div className="max-w-md px-4 text-center">
+              <p className="text-2xl">🔒</p>
+              <p className="mt-1 text-xs font-semibold leading-relaxed text-red-200">
+                Parashikimi i bllokuar: Teorema A′ dështoi (Mungesë burimesh të pavarura për Kosovën).
+                Shto më shumë burime RSS për ta zhbllokuar.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+      {hStar != null && model.id === ROUTER_ID && (
+        <p className="mt-2 text-[10px] text-slate-500">
+          Theorem D-forecast: h* = <span className="font-mono text-slate-300">{hStar} muaj</span>
+          {" "}· horizonet përtej h* shfaqen si <span className="text-amber-400">prior-dominated</span>.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function RegimeCard({ model, explain }: { model: ModelData; explain: boolean }) {
+  return (
+    <CardShell title="Regime Distribution" explain={explain ? EXPLAIN_REGIME : undefined}>
+      <div className="h-28"><RegimeAreaChart series={model.regimeSeries} /></div>
+      <div className="mt-3 grid grid-cols-2 gap-1.5 text-[10px]">
+        {(["bullish", "bearish", "volatile", "stable"] as const).map((k) => (
+          <span key={k} className="flex items-center gap-1.5 text-slate-400">
+            <span className="h-2 w-2 rounded-sm" style={{ background: REGIME_COLORS[k] }} />
+            {k[0].toUpperCase() + k.slice(1)}
+          </span>
+        ))}
+      </div>
+    </CardShell>
+  );
+}
+
+function RoutingCard({ model, explain, aPrime, bPrime }: {
+  model: ModelData; explain: boolean; aPrime: string; bPrime: string;
+}) {
+  return (
+    <CardShell title="Active Routing Status" explain={explain ? EXPLAIN_ROUTING : undefined}>
+      <div className="space-y-3">
+        <Bar label="David Alpha" value={model.routing.davidAlpha} color="#22d3ee" />
+        <Bar label="DeepNet" value={model.routing.deepNet} color="#a78bfa" />
+      </div>
+      <div className="mt-4 flex gap-2 text-[10px]">
+        <span className={`rounded px-2 py-0.5 ${gateChipClass(aPrime)}`}>A′ {aPrime}</span>
+        <span className={`rounded px-2 py-0.5 ${gateChipClass(bPrime)}`}>B′ {bPrime}</span>
+      </div>
+    </CardShell>
+  );
+}
+
+function IndicatorsCard({ model }: { model: ModelData }) {
+  return (
+    <CardShell title="Key Indicators">
+      <div className="space-y-3">
+        <Bar label="Volume" value={model.indicators.volume} color="#34d399" />
+        <Bar label="VIX" value={model.indicators.vix} color="#fbbf24" />
+      </div>
+      <p className="mt-3 text-[10px] leading-relaxed text-slate-600">
+        Treguesit e shëndetit përmbledhin vëllimin e provave dhe paqëndrueshmërinë e regjimit.
+      </p>
+    </CardShell>
+  );
+}
+
 export function ForecastRouter(props: RouterDataProps) {
-  const [activeId, setActiveId] = useState("router");
+  const [activeId, setActiveId] = useState(ROUTER_ID);
   const [explain, setExplain] = useState(false);
 
-  const models = useMemo(() => {
-    // Inject real data into the "router" model when present.
-    return BASE_MODELS.map((m) => {
-      if (m.id !== "router") return m;
-      const curve = props.realCurve && props.realCurve.length > 1 ? props.realCurve : m.curve;
-      const probability = props.realProbability != null ? props.realProbability * 100 : m.probability;
-      return { ...m, curve, probability, direction: probability >= 50 ? "up" : "down" as "up" | "down" };
-    });
-  }, [props.realCurve, props.realProbability]);
-
-  const model = models.find((m) => m.id === activeId)!;
+  const models = useMemo(
+    () => buildModels(props.realCurve, props.realProbability),
+    [props.realCurve, props.realProbability],
+  );
+  const model = models.find((m) => m.id === activeId) ?? models[0];
   const certified = !props.sbcFail && !props.theoremFail;
 
   return (
     <div className="relative space-y-6">
-      {/* ── Header ──────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">
-            FORECAST ROUTER <span className="text-slate-600">|</span>{" "}
-            <span className="text-base font-medium text-slate-400">Performance Analytics &amp; Regime Allocation</span>
-          </h1>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-700/40 bg-emerald-950/30 px-2.5 py-1 text-emerald-300">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 dot-live text-emerald-400 animate-pulse" />
-              AI Engine Active
-            </span>
-            <span className="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-slate-400">
-              Data Updated: {props.updatedAgo}
-            </span>
-            <span className="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-slate-400">
-              Confidence: <span className="text-cyan-300">High</span>
-            </span>
-            {props.usingMock && (
-              <span className="rounded-full border border-amber-700/40 bg-amber-950/20 px-2.5 py-1 text-amber-300">
-                demo data (backend empty)
-              </span>
-            )}
-          </div>
-        </div>
+      <RouterHeader
+        updatedAgo={props.updatedAgo}
+        usingMock={props.usingMock}
+        explain={explain}
+        onToggle={() => setExplain((v) => !v)}
+      />
+      <TrustBanner certified={certified} sbcFail={props.sbcFail} />
 
-        {/* Albanian Explanation Mode toggle */}
-        <button
-          type="button"
-          onClick={() => setExplain((v) => !v)}
-          className={`inline-flex items-center gap-2 rounded-lg border px-3.5 py-2 text-sm font-medium transition-all ${
-            explain
-              ? "border-sky-400/60 bg-sky-950/50 text-sky-200 glow-cyan"
-              : "border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200"
-          }`}
-          aria-pressed={explain}
-        >
-          🇦🇱 Shpjegimi
-          <span className={`text-[10px] uppercase ${explain ? "text-sky-300" : "text-slate-600"}`}>
-            {explain ? "Aktiv" : "Joaktiv"}
-          </span>
-        </button>
-      </div>
-
-      {/* ── Certified / locked status banner ────────────────────────────── */}
-      {certified ? (
-        <div className="flex items-center gap-2 rounded-xl border border-emerald-700/50 bg-emerald-950/30 px-4 py-2.5 text-sm font-medium text-emerald-300 glow-emerald">
-          🛡️ Parashikim i Certifikuar Matematikisht (SBC &amp; Theorem A′ Passed)
-        </div>
-      ) : (
-        <div className="flex items-center gap-2 rounded-xl border border-red-700/50 bg-red-950/30 px-4 py-2.5 text-sm font-medium text-red-300">
-          ⛔ {props.sbcFail
-            ? "Motori i bllokuar: Modeli nuk është i kalibruar matematikisht lokalisht."
-            : "Disa stratume janë të bllokuara nga teoremat. Shih kurbën më poshtë."}
-        </div>
-      )}
-
-      {/* ── Workspace: model selector + main grid ───────────────────────── */}
       <div className="flex flex-col gap-5 lg:flex-row">
-        {/* Model selector sidebar */}
-        <div className="flex shrink-0 flex-row gap-2 lg:w-52 lg:flex-col">
-          <p className="hidden text-[11px] font-semibold uppercase tracking-wider text-slate-600 lg:block">
-            Models
-          </p>
-          {models.map((m) => {
-            const active = m.id === activeId;
-            return (
-              <button
-                key={m.id}
-                onClick={() => setActiveId(m.id)}
-                className={`flex-1 rounded-lg border px-3 py-2.5 text-left text-sm transition-all lg:flex-none ${
-                  active
-                    ? "border-cyan-400/60 bg-cyan-950/30 text-cyan-200 glow-cyan"
-                    : "border-slate-800 bg-slate-900/50 text-slate-400 hover:border-slate-600 hover:text-slate-200"
-                }`}
-              >
-                <span className="flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full" style={{ background: m.accent, boxShadow: active ? `0 0 8px ${m.accent}` : "none" }} />
-                  {m.name}
-                </span>
-              </button>
-            );
-          })}
+        <ModelSelector
+          models={models}
+          activeId={activeId}
+          onSelect={setActiveId}
+          activeStratum={props.activeStratum}
+          runId={props.runId}
+        />
 
-          <div className="mt-2 hidden rounded-lg border border-slate-800 bg-slate-900/40 p-3 text-[10px] leading-relaxed text-slate-500 lg:block">
-            Stratum aktiv: <span className="font-mono text-slate-300">{props.activeStratum}</span>
-            {props.runId && (
-              <>
-                <br />Run: <span className="font-mono text-slate-400">{props.runId.slice(0, 14)}…</span>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Main grid */}
         <div className="relative grid flex-1 grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {/* Calibration lock overlay (whole grid) */}
-          {props.sbcFail && (
-            <div className="absolute inset-0 z-40 flex items-center justify-center rounded-xl bg-[#020617]/85 backdrop-blur-sm">
-              <div className="max-w-sm rounded-xl border border-red-700/50 bg-red-950/40 p-5 text-center">
-                <p className="text-3xl">🔒</p>
-                <p className="mt-2 text-sm font-semibold text-red-200">
-                  Motori i bllokuar: Modeli nuk është i kalibruar matematikisht lokalisht.
-                </p>
-                <p className="mt-2 text-xs text-red-300/70">
-                  SBC (Simulation-Based Calibration) ka statusin <b>fail</b>. Rikalibroni modelin para se të parashikoni.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Card 1 — Current Probabilities */}
-          <CardShell title="Current Probabilities" explain={explain ? {
-            title: "Probabiliteti Aktual",
-            body: "Probabiliteti posterior i agreguar nga koduesit e pavarur LLM nëpërmjet modelit Dawid-Skene, i cili korrigjon për saktësinë (sensitivitet/specificitet) e secilit burim përpara se t'i bashkojë vlerësimet.",
-            formula: "P(aktiv | të dhënat) = ∫ θ · p(θ|y) dθ",
-          } : undefined}>
-            <div className="flex items-end gap-2">
-              <span className={`text-4xl font-bold ${model.direction === "up" ? "text-emerald-400 neon-green" : "text-red-400 neon-rose"}`}>
-                {model.probability.toFixed(1)}%
-              </span>
-              <span className={`mb-1 text-xl ${model.direction === "up" ? "text-emerald-400" : "text-red-400"}`}>
-                {model.direction === "up" ? "↑" : "↓"}
-              </span>
-            </div>
-            <div className="mt-4 space-y-2 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Expected Return</span>
-                <span className={`font-mono ${model.expectedReturn >= 0 ? "text-emerald-300" : "text-red-300"}`}>
-                  {model.expectedReturn >= 0 ? "+" : ""}{model.expectedReturn.toFixed(1)}%
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Risk Score</span>
-                <span className="font-mono text-amber-300">{model.riskScore}/100</span>
-              </div>
-            </div>
-          </CardShell>
-
-          {/* Card 2 — Forecast Probabilities Chart (CI bands) */}
-          <div className="card-premium relative p-4 md:col-span-1 xl:col-span-2">
-            {explain && <ExplainDot
-              side="left"
-              title="Intervalet e Besueshmërisë"
-              body="Brezat tregojnë pasigurinë prior→posterior të vlerësuar nga zinxhirët MCMC. Brezi 80% dhe 95% janë intervale të besueshmërisë Bayesiane: me probabilitet 95% vlera e vërtetë ndodhet brenda brezit të jashtëm."
-              formula="CI₉₅ = [Q₀.₀₂₅(θ|y), Q₀.₉₇₅(θ|y)]"
-            />}
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Forecast Probabilities</p>
-              <div className="flex gap-3 text-[10px] text-slate-500">
-                <span className="flex items-center gap-1"><span className="inline-block h-2 w-3 rounded" style={{ background: model.accent, opacity: 0.5 }} /> 80% CI</span>
-                <span className="flex items-center gap-1"><span className="inline-block h-2 w-3 rounded" style={{ background: model.accent, opacity: 0.18 }} /> 95% CI</span>
-              </div>
-            </div>
-            <div className="relative h-44">
-              <ForecastAreaChart curve={model.curve} accent={model.accent} />
-              {/* Per-stratum theorem lock (only the curve is gated) */}
-              {props.theoremFail && !props.sbcFail && (
-                <div className="absolute inset-0 z-30 flex items-center justify-center rounded-lg bg-[#020617]/88 backdrop-blur-sm">
-                  <div className="max-w-md px-4 text-center">
-                    <p className="text-2xl">🔒</p>
-                    <p className="mt-1 text-xs font-semibold leading-relaxed text-red-200">
-                      Parashikimi i bllokuar: Teorema A′ dështoi (Mungesë burimesh të pavarura për Kosovën).
-                      Shto më shumë burime RSS për ta zhbllokuar.
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-            {props.hStar != null && model.id === "router" && (
-              <p className="mt-2 text-[10px] text-slate-500">
-                Theorem D-forecast: h* = <span className="font-mono text-slate-300">{props.hStar} muaj</span>
-                {" "}· horizonet përtej h* shfaqen si <span className="text-amber-400">prior-dominated</span>.
-              </p>
-            )}
-          </div>
-
-          {/* Card 3 — Regime Distribution */}
-          <CardShell title="Regime Distribution" explain={explain ? {
-            side: "left",
-            title: "Shpërndarja e Regjimeve",
-            body: "Klasat latente të modelit hartohen në taktikat e ndërhyrjes së industrisë së duhanit: Bullish↔ofensivë SIO, Bearish↔presion CSIO, Volatile↔MIO oportuniste, Stable↔periudha pa ndërhyrje.",
-            formula: "z_t ~ Categorical(π),  Σπ = 1",
-          } : undefined}>
-            <div className="h-28">
-              <RegimeAreaChart series={model.regimeSeries} />
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-1.5 text-[10px]">
-              {(["bullish", "bearish", "volatile", "stable"] as const).map((k) => (
-                <span key={k} className="flex items-center gap-1.5 text-slate-400">
-                  <span className="h-2 w-2 rounded-sm" style={{ background: REGIME_COLORS[k] }} />
-                  {k[0].toUpperCase() + k.slice(1)}
-                </span>
-              ))}
-            </div>
-          </CardShell>
-
-          {/* Card 4 — Active Routing Status */}
-          <CardShell title="Active Routing Status" explain={explain ? {
-            side: "left",
-            title: "Statusi i Rrugëzimit / Teoremat",
-            body: "Rrugëzuesi kombinon dy motorë. Parashikimet zhbllokohen vetëm kur stratumi ka ≥ 3 burime strukturalisht të pavarura (Teorema A′) — kjo garanton identifikueshmëri dhe pengon kapjen nga një burim i vetëm.",
-            formula: "A′:  #{burime të pavarura} ≥ 3",
-          } : undefined}>
-            <div className="space-y-3">
-              <Bar label="David Alpha" value={model.routing.davidAlpha} color="#22d3ee" />
-              <Bar label="DeepNet" value={model.routing.deepNet} color="#a78bfa" />
-            </div>
-            <div className="mt-4 flex gap-2 text-[10px]">
-              <span className={`rounded px-2 py-0.5 ${props.aPrime === "pass" ? "bg-emerald-950/60 text-emerald-300" : "bg-red-950/60 text-red-300"}`}>
-                A′ {props.aPrime}
-              </span>
-              <span className={`rounded px-2 py-0.5 ${props.bPrime === "pass" ? "bg-emerald-950/60 text-emerald-300" : "bg-red-950/60 text-red-300"}`}>
-                B′ {props.bPrime}
-              </span>
-            </div>
-          </CardShell>
-
-          {/* Card 5 — Key Indicators */}
-          <CardShell title="Key Indicators">
-            <div className="space-y-3">
-              <Bar label="Volume" value={model.indicators.volume} color="#34d399" />
-              <Bar label="VIX" value={model.indicators.vix} color="#fbbf24" />
-            </div>
-            <p className="mt-3 text-[10px] leading-relaxed text-slate-600">
-              Treguesit e shëndetit përmbledhin vëllimin e provave dhe paqëndrueshmërinë e regjimit.
-            </p>
-          </CardShell>
+          {props.sbcFail && <CalibrationLock />}
+          <CurrentProbabilitiesCard model={model} explain={explain} />
+          <ForecastChartCard
+            model={model}
+            explain={explain}
+            theoremFail={props.theoremFail}
+            sbcFail={props.sbcFail}
+            hStar={props.hStar}
+          />
+          <RegimeCard model={model} explain={explain} />
+          <RoutingCard model={model} explain={explain} aPrime={props.aPrime} bPrime={props.bPrime} />
+          <IndicatorsCard model={model} />
         </div>
       </div>
     </div>
