@@ -42,6 +42,8 @@ print('[david] CmdStan path set:', '${CMDSTAN_DIR}')
 
 echo "=== [3/3] Pre-compile Stan model ==="
 uv run python -c "
+import cmdstanpy
+cmdstanpy.set_cmdstan_path('${CMDSTAN_DIR}')
 from cmdstanpy import CmdStanModel
 import pathlib
 stan_file = pathlib.Path('/app/stan/m01_forward.stan')
@@ -49,6 +51,6 @@ if not stan_file.exists():
     raise FileNotFoundError(f'Stan file not found: {stan_file}')
 model = CmdStanModel(stan_file=str(stan_file))
 print(f'[david] Stan binary compiled: {model.exe_file}')
-" || echo "[david] WARNING: Stan pre-compile failed — will compile at runtime"
+"
 
 echo "=== Build complete ==="
