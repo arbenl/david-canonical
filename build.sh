@@ -41,14 +41,20 @@ print('[david] CmdStan path set:', '${CMDSTAN_DIR}')
 "
 
 echo "=== [3/3] Pre-compile Stan model ==="
-CMDSTAN="${CMDSTAN_DIR}" uv run python -c "
-from cmdstanpy import CmdStanModel
-import pathlib
-stan_file = pathlib.Path('/app/stan/m01_forward.stan')
-if not stan_file.exists():
-    raise FileNotFoundError(f'Stan file not found: {stan_file}')
-model = CmdStanModel(stan_file=str(stan_file))
-print(f'[david] Stan binary compiled: {model.exe_file}')
-"
+STAN_EXE="/app/stan/m01_forward"
+STAN_FILE="/app/stan/m01_forward.stan"
+if [ ! -f "${STAN_FILE}" ]; then
+    echo "[david] ERROR: Stan file not found: ${STAN_FILE}"
+    exit 1
+fi
+if [ -f "${STAN_EXE}" ]; then
+    echo "[david] Stan model already compiled: ${STAN_EXE}"
+else
+    echo "[david] Compiling Stan model via CmdStan make…"
+    make -C "${CMDSTAN_DIR}" \
+        "STANCFLAGS+=--filename-in-msg=m01_forward.stan" \
+        "${STAN_EXE}"
+    echo "[david] Stan binary compiled: ${STAN_EXE}"
+fi
 
 echo "=== Build complete ==="
