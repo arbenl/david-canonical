@@ -90,8 +90,8 @@ def sample_world(prior: HyperPrior, seed: int | None = None) -> WorldDraw:
     j_raw = rng.normal(0.0, 1.0, size=S)
     delta_observability = rng.normal(0.0, 0.5, size=S)
     j_observability = rng.normal(0.0, 0.5, size=S)
-    kappa_plus = 0.5 + 0.5 * _logistic(rng.normal(1.0, 0.5, size=M))
-    kappa_minus = 0.5 + 0.5 * _logistic(rng.normal(1.0, 0.5, size=M))
+    kappa_plus = 0.5 + 0.5 * _logistic(rng.normal(0.0, 0.5, size=M))   # synced to Stan: normal(0,0.5)
+    kappa_minus = 0.5 + 0.5 * _logistic(rng.normal(0.0, 0.5, size=M))  # mean kappa ≈ 0.75 vs 0.87
     # init: softmax of normal(0,1) — same as Stan's log_softmax(init_raw)
     init_raw = rng.normal(0.0, 1.0, size=L)
     init = _softmax(init_raw)

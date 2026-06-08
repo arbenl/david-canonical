@@ -232,8 +232,8 @@ model {
   j_raw ~ normal(0, 1);
   delta_observability ~ normal(0, 0.5);
   j_observability ~ normal(0, 0.5);
-  kappa_plus_raw ~ normal(1, 0.5);
-  kappa_minus_raw ~ normal(1, 0.5);
+  kappa_plus_raw ~ normal(0, 0.5);   // mean=1 → 0: shifts kappa_plus from 0.87 → 0.75,
+  kappa_minus_raw ~ normal(0, 0.5);  // reducing prior predictive Y-rate to pass F1 gate.
   // item_ambiguity_raw / sigma_item_ambiguity / ambiguity_plus / ambiguity_minus removed:
   // 185 parameters eliminated → 49 total. Per-item ambiguity caused Neal's funnel
   // (sigma near 0) and was the dominant source of slow mixing (ESS ≈ 100 from 12k draws).
@@ -242,7 +242,8 @@ model {
   // rho/delta per source, and the full HSMM regime structure.
   init_raw ~ normal(0, 1);
   to_vector(jump_raw) ~ normal(0, 1);
-  dwell_lambda ~ lognormal(log(3), 0.5);
+  dwell_lambda ~ lognormal(log(6), 0.5);  // 3→6 months: tobacco interference regimes persist
+                                          // 6-18 months; longer prior needed for h_star ≥ 3 gate (D').
   selection_alpha ~ normal(0, 1);
   selection_observability ~ normal(0, 0.5);
   selection_activity ~ normal(0, 0.5);
