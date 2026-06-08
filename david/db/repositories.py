@@ -212,8 +212,10 @@ def upsert_evidence_item(
                         evidence_date = EXCLUDED.evidence_date,
                         title         = EXCLUDED.title,
                         url           = EXCLUDED.url,
-                        text_content  = EXCLUDED.text_content,
-                        adjudicated   = EXCLUDED.adjudicated
+                        text_content  = EXCLUDED.text_content
+                        -- adjudicated is intentionally NOT updated:
+                        -- auto_adjudicate() is the only writer of TRUE values;
+                        -- ingest must never reset items back to FALSE.
             """, (evidence_id, stratum_id, source_id, evidence_date,
                   title, url, text_content, adjudicated))
 

@@ -426,6 +426,24 @@ def _run_pipeline_bg(since_days: int = 7, fit_only: bool = False) -> None:
         _pipeline_running = False
 
 
+@api.post("/internal/readjudicate")
+async def readjudicate(
+    authorization: str = Header(default=""),
+) -> dict:
+    """Re-run auto_adjudicate() from existing coder_labels to restore lost adjudicated flags.
+
+    Safe to call at any time — only sets adjudicated=TRUE, never resets to FALSE.
+    Use after any ingest that may have clobbered adjudicated flags.
+    """
+    _auth_check(authorization)
+    try:
+        from ..ingest.adjudicator_queue import auto_adjudicate
+        result = auto_adjudicate()
+        return {"status": "ok", "result": result}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @api.post("/internal/pipeline/run")
 async def trigger_pipeline(
     background_tasks: BackgroundTasks,
