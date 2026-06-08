@@ -740,9 +740,9 @@ def run_fit(run_id: str | None = None) -> dict[str, Any]:
     }
 
     (fit_dir / "fit_summary.json").write_text(json.dumps(fit_summary, indent=2))
-    fit.draws_pd().to_parquet(fit_dir / "draws.parquet")
 
-    # Persist to Postgres (non-fatal: JSON + parquet are the source of truth)
+    # Write to DB first — before the potentially large parquet write — so a
+    # memory spike during draws_pd() doesn't silently lose the gate result.
     try:
         from ..db.repositories import write_fit_run
         write_fit_run({
@@ -750,7 +750,13 @@ def run_fit(run_id: str | None = None) -> dict[str, Any]:
             "n_strata": data.get("R"),
             "n_labels": data.get("N_label"),
         })
-    except Exception:
-        pass  # DB write failure must not fail the fit
+    except Exception as db_exc:
+        print(f"[fit] DB write failed (non-fatal): {db_exc}", flush=True)
+
+    # Parquet is best-effort — a memory spike here must not lose the fit result.
+    try:
+        fit.draws_pd().to_parquet(fit_dir / "draws.parquet")
+    except Exception as parquet_exc:
+        print(f"[fit] draws parquet write failed (non-fatal): {parquet_exc}", flush=True)
 
     return {**fit_summary, "fit_dir": str(fit_dir)}

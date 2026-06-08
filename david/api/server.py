@@ -391,8 +391,16 @@ def _run_pipeline_bg(since_days: int = 7, fit_only: bool = False) -> None:
             subprocess.run(["david", "ingest", "--since", since],
                            check=True, capture_output=True, text=True)
         _pipeline_step = "fitting"
-        subprocess.run(["david", "fit"],
-                       capture_output=True, text=True)   # non-fatal if fit fails
+        fit_result = subprocess.run(
+            ["david", "fit"],
+            capture_output=True, text=True,
+        )
+        if fit_result.stdout:
+            print(f"[pipeline] fit stdout:\n{fit_result.stdout}", flush=True)
+        if fit_result.stderr:
+            print(f"[pipeline] fit stderr:\n{fit_result.stderr}", flush=True)
+        if fit_result.returncode not in (0, 2):  # 2 = gate fail (expected); others unexpected
+            print(f"[pipeline] fit exited with code {fit_result.returncode}", flush=True)
         _pipeline_step = "done"
     except Exception as exc:
         _pipeline_step = f"error: {exc}"
