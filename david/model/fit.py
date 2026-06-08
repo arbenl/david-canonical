@@ -33,14 +33,18 @@ _CMDSTAN_URL = (
     f"https://github.com/stan-dev/cmdstan/releases/download/"
     f"v{_CMDSTAN_VERSION}/cmdstan-{_CMDSTAN_VERSION}.tar.gz"
 )
+# Install inside /app so Railpack's "copy /app" step bakes it into the image.
+_CMDSTAN_DIR = f"/app/.cmdstan/cmdstan-{_CMDSTAN_VERSION}"
 
 
 def _ensure_cmdstan() -> None:
-    """Install CmdStan (and build tools if missing) on first use.
+    """Ensure CmdStan is available and registered with cmdstanpy.
 
-    Fast path : ~/.cmdstan/cmdstan-{version} already present — returns immediately.
-    Slow path : apt-get update → install make/g++ → download tarball directly
-                (no GitHub API) → extract → make build → set_cmdstan_path.
+    Fast path A: /app/.cmdstan/cmdstan-VERSION/bin/stanc exists (baked by build.sh)
+                 → just call set_cmdstan_path and return.
+    Fast path B: cmdstanpy already knows a valid path → return.
+    Slow path  : apt-get update → install make/g++ → download tarball →
+                 extract to /app/.cmdstan/ → make build → set_cmdstan_path.
     """
     import os
     import subprocess
@@ -48,13 +52,23 @@ def _ensure_cmdstan() -> None:
     import urllib.request
     from pathlib import Path
 
+    import cmdstanpy as _csp
+
+    # Fast path A — baked binary from build.sh
+    baked = Path(_CMDSTAN_DIR) / "bin" / "stanc"
+    if baked.exists():
+        _csp.set_cmdstan_path(_CMDSTAN_DIR)
+        return
+
+    # Fast path B — cmdstanpy already configured
     try:
         from cmdstanpy.utils.cmdstan import cmdstan_path
-        cmdstan_path()   # raises ValueError if not installed
-        return           # already present
+        cmdstan_path()
+        return
     except ValueError:
         pass
 
+    # Slow path — install from scratch
     make_bin = _find_executable("make")
     if make_bin is None:
         print("[david] make not found — running apt-get update + install…", flush=True)
@@ -67,33 +81,29 @@ def _ensure_cmdstan() -> None:
 
     if make_bin is None:
         raise RuntimeError(
-            "make not found after apt-get install. "
-            "Ensure nixpacks.toml has aptPkgs=[\"make\",\"g++\"] "
-            "or pre-install CmdStan in build.sh."
+            "make not found after apt-get install — cannot compile CmdStan."
         )
+
+    install_parent = Path("/app/.cmdstan")
+    install_parent.mkdir(parents=True, exist_ok=True)
+    install_dir = install_parent / f"cmdstan-{_CMDSTAN_VERSION}"
 
     print(f"[david] Downloading CmdStan {_CMDSTAN_VERSION}…", flush=True)
     tarball = Path(f"/tmp/cmdstan-{_CMDSTAN_VERSION}.tar.gz")
     urllib.request.urlretrieve(_CMDSTAN_URL, tarball)
 
-    install_parent = Path.home() / ".cmdstan"
-    install_parent.mkdir(parents=True, exist_ok=True)
-    install_dir = install_parent / f"cmdstan-{_CMDSTAN_VERSION}"
-
     print("[david] Extracting…", flush=True)
     with tarfile.open(tarball, "r:gz") as tar:
         tar.extractall(install_parent)
+    tarball.unlink(missing_ok=True)
 
     print(f"[david] Building CmdStan with {make_bin} (make build — ~8 min)…", flush=True)
-    # Pass a broad PATH so g++ is also locatable by make sub-processes
     env = os.environ.copy()
     env["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:" + env.get("PATH", "")
     subprocess.run([make_bin, "build"], cwd=str(install_dir), env=env, check=True)
 
-    import cmdstanpy as _csp
     _csp.set_cmdstan_path(str(install_dir))
     print(f"[david] CmdStan ready at {install_dir}", flush=True)
-    tarball.unlink(missing_ok=True)
 
 
 def _find_executable(name: str) -> str | None:
