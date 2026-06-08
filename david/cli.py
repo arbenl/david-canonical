@@ -81,17 +81,14 @@ def ingest(
             )
             coded = []
         else:
-            # Skip 'gl_*' strata: plos_medicine_rss sends non-tobacco journal
-            # articles into gl_general. All country-level strata (including
-            # *_general) come from tobacco-specific feeds and contribute to
-            # Dawid-Skene.
-            tobacco_items = [e for e in normalized if not e.stratum_id.startswith("gl_")]
+            # normalize_raw() already pre-filtered to tobacco-relevant items only
+            # (gl_* excluded + keyword filter), so no additional filtering needed.
             console.print(
-                f"[bold]Step 3/4[/] Coding {len(tobacco_items)}/{len(normalized)} "
-                f"tobacco-specific item(s) × {len(llm_pool)} coder(s) "
+                f"[bold]Step 3/4[/] Coding {len(normalized)} "
+                f"tobacco-relevant item(s) × {len(llm_pool)} coder(s) "
                 f"× {len(TACTIC_CLASSES)} tactic(s)…"
             )
-            coded = code_evidence(tobacco_items, llm_pool, list(TACTIC_CLASSES))
+            coded = code_evidence(normalized, llm_pool, list(TACTIC_CLASSES))
             console.print(f"  {len(coded)} label(s) written to coder_labels")
 
     # ── Step 4: auto-adjudication ───────────────────────────────────────────

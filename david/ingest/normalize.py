@@ -107,6 +107,43 @@ _POLICY_DEFAULT = "general"
 # Observability score per tier (pre-registered in ARCHITECTURE.md §3.2)
 _TIER_TO_I_O: dict[int, float] = {0: 0.30, 1: 0.50, 2: 0.70, 3: 0.90}
 
+# ─── tobacco relevance pre-filter ────────────────────────────────────────────
+# Items that match at least one keyword are considered potentially relevant to
+# tobacco industry political interference and are forwarded to LLM coding + DB.
+# Items that match none are written to the JSON-L audit trail but NOT upserted
+# to Postgres, preventing non-tobacco noise from diluting strata.
+#
+# Design: conservative (prefer false-positives over false-negatives).
+# Substring matching — "tobacco" catches "tobacco industry", "tobacco company" etc.
+_TOBACCO_KEYWORDS: frozenset[str] = frozenset({
+    # Products
+    "tobacco", "cigarette", "cigar", "smokeless", "snus", "snuff",
+    "nicotine", "vaping", "vape", "e-cigarette", "ecig", "e-cig",
+    "iqos", "heated tobacco", "heat-not-burn", "htp", "juul",
+    # Companies
+    "philip morris", "altria", "british american tobacco",
+    "japan tobacco", "jti", "reynolds", "imperial tobacco", "imperial brands",
+    "lorillard", "scandinavian tobacco",
+    # Policy / regulation
+    "fctc", "tobacco control", "plain packaging", "menthol ban",
+    "flavour ban", "flavor ban", "tobacco tax", "tobacco duty",
+    "smoke-free", "smoking ban", "tobacco advertising",
+    "illicit tobacco", "tobacco smuggling",
+    # Interference / lobbying
+    "tobacco lobby", "industry interference", "tobacco industry",
+})
+
+
+def is_tobacco_relevant(title: str, text: str) -> bool:
+    """Return True if title+text plausibly relates to tobacco industry interference.
+
+    Uses fast substring matching against a pre-compiled keyword set.
+    Conservative: prefers false-positives over false-negatives so that
+    borderline items still reach LLM coding for final classification.
+    """
+    combined = (title + " " + text).lower()
+    return any(kw in combined for kw in _TOBACCO_KEYWORDS)
+
 
 # ─── schema ──────────────────────────────────────────────────────────────────
 
@@ -259,8 +296,17 @@ def normalize_raw(raw_paths: list[Path]) -> list[CanonicalEvidence]:
 
                 canon = _normalize_one(raw, source_family=family,
                                        structural_independence_signature=si_sig)
-                records.append(canon)
+
+                # Always write to JSON-L (audit trail — complete record of scrape)
                 f.write(canon.model_dump_json() + "\n")
+
+                # Tobacco relevance pre-filter: skip non-tobacco items from DB + coding.
+                # gl_* strata are non-tobacco by construction (PLOS Medicine RSS).
+                # Keyword filter catches other non-tobacco items from mixed-content feeds.
+                if canon.stratum_id.startswith("gl_") or not is_tobacco_relevant(canon.title, canon.text):
+                    continue  # don't upsert; don't add to returned records
+
+                records.append(canon)
 
                 # Upsert to Postgres (non-fatal)
                 try:
