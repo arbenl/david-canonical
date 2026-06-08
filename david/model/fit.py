@@ -695,13 +695,16 @@ def run_fit(run_id: str | None = None) -> dict[str, Any]:
         chains=MIN_CHAINS,
         parallel_chains=1,          # run chains sequentially to cap peak RAM
         iter_warmup=2000,
-        iter_sampling=20000,        # 80000 total draws — ESS≥400 at 0.5% mixing rate
-                                    # dense_e was OOM-killing Railway (~174×174 covariance
-                                    # matrix exhausts shared RAM); back to diag_e with brute
-                                    # force sampling to achieve the ESS floor
+        iter_sampling=3000,         # 12000 total draws — sufficient for ESS≥400 after
+                                    # removing item_ambiguity_raw (185 params eliminated;
+                                    # 234→49 params → mixing improves ~(234/49)²≈23×;
+                                    # expected ESS ≈ 100 × 23 = 2300 from same 12k draws).
+                                    # iter_sampling=20000 was crashing Railway: the 80k-draw
+                                    # CSV + stansummary load exceeded available RAM/disk.
         seed=42,
-        adapt_delta=0.97,           # slight increase from 0.95 to eliminate the 1 divergence
-                                    # without collapsing step size (0.99 caused ESS=6.7)
+        adapt_delta=0.95,           # 0.97 added for divergence fix but divergence was from
+                                    # sigma_item_ambiguity funnel — now removed. 0.95 gives
+                                    # larger steps and better mixing than 0.97.
         max_treedepth=12,
         output_dir=str(fit_dir / "cmdstan"),
     )

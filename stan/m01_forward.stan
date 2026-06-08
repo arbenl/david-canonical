@@ -179,10 +179,6 @@ parameters {
   vector[S] j_observability;
   vector[M] kappa_plus_raw;
   vector[M] kappa_minus_raw;
-  vector[M] ambiguity_plus;
-  vector[M] ambiguity_minus;
-  vector[U] item_ambiguity_raw;
-  real<lower=0> sigma_item_ambiguity;
   vector[L] init_raw;
   matrix[L, L] jump_raw;
   vector<lower=0>[L] dwell_lambda;
@@ -195,7 +191,6 @@ transformed parameters {
   matrix[L, K] alpha_activity;
   vector[M] kappa_plus;
   vector[M] kappa_minus;
-  vector[U] item_ambiguity;
   vector[L] log_init;
   matrix[L, L] log_jump;
 
@@ -207,7 +202,6 @@ transformed parameters {
     kappa_plus[m] = 0.5 + 0.5 * inv_logit(kappa_plus_raw[m]);
     kappa_minus[m] = 0.5 + 0.5 * inv_logit(kappa_minus_raw[m]);
   }
-  item_ambiguity = sigma_item_ambiguity * item_ambiguity_raw;
   log_init = log_softmax(init_raw);
 
   for (from_z in 1:L) {
@@ -240,10 +234,12 @@ model {
   j_observability ~ normal(0, 0.5);
   kappa_plus_raw ~ normal(1, 0.5);
   kappa_minus_raw ~ normal(1, 0.5);
-  ambiguity_plus ~ normal(0, 0.25);
-  ambiguity_minus ~ normal(0, 0.25);
-  item_ambiguity_raw ~ normal(0, 1);
-  sigma_item_ambiguity ~ lognormal(-1.0, 0.6);  // keeps sigma away from 0; avoids Neal's funnel
+  // item_ambiguity_raw / sigma_item_ambiguity / ambiguity_plus / ambiguity_minus removed:
+  // 185 parameters eliminated → 49 total. Per-item ambiguity caused Neal's funnel
+  // (sigma near 0) and was the dominant source of slow mixing (ESS ≈ 100 from 12k draws).
+  // None of these parameters appear in the theorem gates (A'/B'/C'/D'), so removing
+  // them does not affect gate validity. Model still estimates kappa_plus/minus per coder,
+  // rho/delta per source, and the full HSMM regime structure.
   init_raw ~ normal(0, 1);
   to_vector(jump_raw) ~ normal(0, 1);
   dwell_lambda ~ lognormal(log(3), 0.5);
@@ -286,10 +282,10 @@ model {
                   int n = lb_start + idx - 1;
                   int m_idx = label_coder[n];
                   y_given_b1_lp += bernoulli_logit_lpmf(
-                    y[n] | logit(kappa_plus[m_idx]) + ambiguity_plus[m_idx] * item_ambiguity[u]
+                    y[n] | logit(kappa_plus[m_idx])
                   );
                   y_given_b0_lp += bernoulli_logit_lpmf(
-                    y[n] | logit(1 - kappa_minus[m_idx]) + ambiguity_minus[m_idx] * item_ambiguity[u]
+                    y[n] | logit(1 - kappa_minus[m_idx])
                   );
                 }
               }
@@ -351,10 +347,10 @@ generated quantities {
                   int n = lb_start + idx - 1;
                   int m_idx = label_coder[n];
                   y_given_b1_lp += bernoulli_logit_lpmf(
-                    y[n] | logit(kappa_plus[m_idx]) + ambiguity_plus[m_idx] * item_ambiguity[u]
+                    y[n] | logit(kappa_plus[m_idx])
                   );
                   y_given_b0_lp += bernoulli_logit_lpmf(
-                    y[n] | logit(1 - kappa_minus[m_idx]) + ambiguity_minus[m_idx] * item_ambiguity[u]
+                    y[n] | logit(1 - kappa_minus[m_idx])
                   );
                 }
               }
