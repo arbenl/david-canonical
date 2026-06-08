@@ -686,14 +686,15 @@ def run_fit(run_id: str | None = None) -> dict[str, Any]:
         data=data,
         chains=MIN_CHAINS,
         parallel_chains=1,          # run chains sequentially to cap peak RAM
-        iter_warmup=2000,           # more warmup → better covariance estimation for dense_e
-        iter_sampling=3000,         # 12000 total draws
+        iter_warmup=2000,
+        iter_sampling=20000,        # 80000 total draws — ESS≥400 at 0.5% mixing rate
+                                    # dense_e was OOM-killing Railway (~174×174 covariance
+                                    # matrix exhausts shared RAM); back to diag_e with brute
+                                    # force sampling to achieve the ESS floor
         seed=42,
-        adapt_delta=0.95,
+        adapt_delta=0.97,           # slight increase from 0.95 to eliminate the 1 divergence
+                                    # without collapsing step size (0.99 caused ESS=6.7)
         max_treedepth=12,
-        metric="dense_e",           # full covariance mass matrix — handles correlated HSMM
-                                    # posteriors; default diag_e gives ESS~100 due to ridge
-                                    # geometry; dense_e typically improves ESS 4-8×
         output_dir=str(fit_dir / "cmdstan"),
     )
 
