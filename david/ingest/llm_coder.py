@@ -294,6 +294,7 @@ def code_uncoded_from_db(
                 WHERE  e.adjudicated = FALSE
                   AND  e.text_content IS NOT NULL
                   AND  length(e.text_content) > 50
+                  AND  e.stratum_id NOT LIKE 'gl\_%'
                   AND  NOT EXISTS (
                            SELECT 1 FROM coder_labels cl
                            WHERE  cl.evidence_id = e.evidence_id
