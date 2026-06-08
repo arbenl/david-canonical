@@ -390,6 +390,23 @@ def _run_pipeline_bg(since_days: int = 7, fit_only: bool = False) -> None:
             since = (date.today() - timedelta(days=since_days)).isoformat()
             subprocess.run(["david", "ingest", "--since", since],
                            check=True, capture_output=True, text=True)
+
+            # Code any existing items that were previously skipped
+            _pipeline_step = "coding_uncoded"
+            try:
+                from ..ingest.llm_coder import load_llm_pool, code_uncoded_from_db
+                from ..ingest.adjudicator_queue import auto_adjudicate
+                from ..config import TACTIC_CLASSES
+                llm_pool = load_llm_pool()
+                if llm_pool:
+                    n_coded = len(code_uncoded_from_db(llm_pool, list(TACTIC_CLASSES)))
+                    if n_coded:
+                        auto_adjudicate()
+                        print(f"[pipeline] coded_uncoded={n_coded} labels, re-adjudicated",
+                              flush=True)
+            except Exception as _exc:
+                print(f"[pipeline] code_uncoded failed (non-fatal): {_exc}", flush=True)
+
         _pipeline_step = "fitting"
         fit_result = subprocess.run(
             ["david", "fit"],

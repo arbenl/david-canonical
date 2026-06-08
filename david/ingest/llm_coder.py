@@ -272,6 +272,46 @@ def code_evidence(
     return records
 
 
+def code_uncoded_from_db(
+    llm_pool: list,
+    tactic_classes: list[str],
+    limit: int = 300,
+) -> list[dict]:
+    """Fetch evidence_items that have no coder_labels yet and code them.
+
+    Used by the pipeline to sweep up items that were scraped in a previous
+    cycle but skipped coding (e.g., due to the now-removed policy_area filter).
+    """
+    from types import SimpleNamespace
+    from ..db.connection import get_conn
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT e.evidence_id, e.text_content
+                FROM   evidence_items e
+                WHERE  e.adjudicated = FALSE
+                  AND  e.text_content IS NOT NULL
+                  AND  length(e.text_content) > 50
+                  AND  NOT EXISTS (
+                           SELECT 1 FROM coder_labels cl
+                           WHERE  cl.evidence_id = e.evidence_id
+                       )
+                ORDER  BY e.evidence_date DESC
+                LIMIT  %s
+                """,
+                (limit,),
+            )
+            rows = cur.fetchall()
+
+    if not rows:
+        return []
+
+    items = [SimpleNamespace(evidence_id=r[0], text=r[1]) for r in rows]
+    return code_evidence(items, llm_pool, tactic_classes)
+
+
 # ─── calibration ─────────────────────────────────────────────────────────────
 
 def _load_gold_labels(gold_path: Path) -> dict[str, int]:

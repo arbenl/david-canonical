@@ -687,9 +687,9 @@ def run_fit(run_id: str | None = None) -> dict[str, Any]:
         chains=MIN_CHAINS,
         parallel_chains=1,          # run chains sequentially to cap peak RAM
         iter_warmup=1000,
-        iter_sampling=MIN_POSTERIOR_DRAWS // MIN_CHAINS,
+        iter_sampling=1500,         # 6000 total draws → ESS ≥ 400 with ≥7% mixing rate
         seed=42,
-        adapt_delta=0.95,
+        adapt_delta=0.99,           # was 0.95; 0.99 eliminates the 1-divergence failure
         max_treedepth=10,           # was 12 (4096 steps); 10 = 1024 steps, 4× less RAM
         output_dir=str(fit_dir / "cmdstan"),
     )

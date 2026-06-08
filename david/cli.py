@@ -81,16 +81,13 @@ def ingest(
             )
             coded = []
         else:
-            # Code only tobacco-relevant items (policy_area != 'general').
-            # General-news items carry no tobacco signal — coding them wastes
-            # LLM tokens without contributing to Dawid-Skene.
-            tobacco_items = [e for e in normalized if e.policy_area != "general"]
+            # Code all newly scraped items — 'general' strata are still sourced
+            # from tobacco-specific RSS feeds and do contribute to Dawid-Skene.
             console.print(
-                f"[bold]Step 3/4[/] Coding {len(tobacco_items)}/{len(normalized)} "
-                f"tobacco-relevant item(s) × {len(llm_pool)} coder(s) "
-                f"× {len(TACTIC_CLASSES)} tactic(s)…"
+                f"[bold]Step 3/4[/] Coding {len(normalized)} item(s) × {len(llm_pool)} "
+                f"coder(s) × {len(TACTIC_CLASSES)} tactic(s)…"
             )
-            coded = code_evidence(tobacco_items, llm_pool, list(TACTIC_CLASSES))
+            coded = code_evidence(normalized, llm_pool, list(TACTIC_CLASSES))
             console.print(f"  {len(coded)} label(s) written to coder_labels")
 
     # ── Step 4: auto-adjudication ───────────────────────────────────────────
