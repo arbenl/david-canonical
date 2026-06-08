@@ -83,7 +83,7 @@ def sample_world(prior: HyperPrior, seed: int | None = None) -> WorldDraw:
     # Parameters (priors must match Stan model exactly for SBC to be valid)
     Pi = _sample_pi_stan_prior(rng, L)
     dwell_lambda = np.exp(rng.normal(np.log(6.0), 0.5, size=L))  # synced to Stan: lognormal(log(6),0.5)
-    alpha_activity = rng.normal(-1.5, 1.5, size=(L, K))  # synced to Stan: N(-1.5,1.5); mean phi≈0.18
+    alpha_activity = rng.normal(-2.0, 1.5, size=(L, K))  # synced to Stan: N(-2.0,1.5); mean phi≈0.12
     alpha_activity[:, 0] = np.sort(alpha_activity[:, 0])  # order statistics — matches Stan ordered[L]
     # Detection: Stan parameterization — delta_raw/j_raw with observability slopes
     delta_raw = rng.normal(0.0, 1.0, size=S)

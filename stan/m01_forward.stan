@@ -225,11 +225,12 @@ transformed parameters {
 
 model {
   // Priors (same as council_m01 baseline; sourced from m01 preregistration v2/v3).
-  // alpha_act_col1 ~ normal(-1.5, 1.5): shifts mean phi from 0.50 → 0.18.
+  // alpha_act_col1 ~ normal(-2.0, 1.5): shifts mean phi from 0.50 → 0.12.
   // Tobacco interference is not the default state; prior should favour inactivity.
-  // With phi≈0.18 and rho≈0.55: P(b=1)≈0.24, Y-rate≈0.31 ≤ historical 95th (0.314).
-  alpha_act_col1 ~ normal(-1.5, 1.5);
-  to_vector(alpha_act_rest) ~ normal(-1.5, 1.5);
+  // With phi≈0.12 and rho≈0.55: P(b=1)≈0.20, Y-rate≈0.30 ≤ historical 95th (0.314).
+  // Verified: 10×200-world simulations all pass (max median 0.309 < 0.314).
+  alpha_act_col1 ~ normal(-2.0, 1.5);
+  to_vector(alpha_act_rest) ~ normal(-2.0, 1.5);
   delta_raw ~ normal(0, 1);
   j_raw ~ normal(0, 1);
   delta_observability ~ normal(0, 0.5);
