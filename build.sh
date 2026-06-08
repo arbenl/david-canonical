@@ -41,9 +41,7 @@ print('[david] CmdStan path set:', '${CMDSTAN_DIR}')
 "
 
 echo "=== [3/3] Pre-compile Stan model ==="
-uv run python -c "
-import cmdstanpy
-cmdstanpy.set_cmdstan_path('${CMDSTAN_DIR}')
+CMDSTAN="${CMDSTAN_DIR}" uv run python -c "
 from cmdstanpy import CmdStanModel
 import pathlib
 stan_file = pathlib.Path('/app/stan/m01_forward.stan')
