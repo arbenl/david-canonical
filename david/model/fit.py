@@ -672,7 +672,15 @@ def run_fit(run_id: str | None = None) -> dict[str, Any]:
     fit_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        data = assemble_fit_data()
+        # H_forecast=1 minimises the generated-quantities output during MCMC.
+        # The generated quantities block emits z_future/a_future arrays of
+        # shape [R, H_forecast, K].  With H_forecast=12 and iter_sampling=20000
+        # that is 20k × 20 × 12 × 3 × 8 bytes ≈ 115 MB per chain → OOM on
+        # Railway's shared compute.  The gate checks only need posterior draws
+        # of model parameters (not forecast trajectories), so H_forecast=1 is
+        # sufficient here.  A separate forecast pass (david forecast) can run
+        # with the full horizon once gates pass.
+        data = assemble_fit_data(H_forecast=1)
     except FileNotFoundError as e:
         return {
             "gate_status": "fail",
