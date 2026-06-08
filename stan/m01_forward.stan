@@ -225,15 +225,17 @@ transformed parameters {
 
 model {
   // Priors (same as council_m01 baseline; sourced from m01 preregistration v2/v3).
-  // alpha_act_col1 ~ normal(0, 1.5) on the ordered simplex = order statistics of N(0, 1.5).
-  alpha_act_col1 ~ normal(0, 1.5);
-  to_vector(alpha_act_rest) ~ normal(0, 1.5);
+  // alpha_act_col1 ~ normal(-1.5, 1.5): shifts mean phi from 0.50 → 0.18.
+  // Tobacco interference is not the default state; prior should favour inactivity.
+  // With phi≈0.18 and rho≈0.55: P(b=1)≈0.24, Y-rate≈0.31 ≤ historical 95th (0.314).
+  alpha_act_col1 ~ normal(-1.5, 1.5);
+  to_vector(alpha_act_rest) ~ normal(-1.5, 1.5);
   delta_raw ~ normal(0, 1);
   j_raw ~ normal(0, 1);
   delta_observability ~ normal(0, 0.5);
   j_observability ~ normal(0, 0.5);
-  kappa_plus_raw ~ normal(0, 0.5);   // mean=1 → 0: shifts kappa_plus from 0.87 → 0.75,
-  kappa_minus_raw ~ normal(0, 0.5);  // reducing prior predictive Y-rate to pass F1 gate.
+  kappa_plus_raw ~ normal(1, 0.5);   // mean=1: kappa_plus ≈ 0.87 (accurate coders, high sensitivity).
+  kappa_minus_raw ~ normal(1, 0.5);  // Reverted: decreasing kappa INCREASES Y-rate when P(b=0)>P(b=1).
   // item_ambiguity_raw / sigma_item_ambiguity / ambiguity_plus / ambiguity_minus removed:
   // 185 parameters eliminated → 49 total. Per-item ambiguity caused Neal's funnel
   // (sigma near 0) and was the dominant source of slow mixing (ESS ≈ 100 from 12k draws).

@@ -82,16 +82,16 @@ def sample_world(prior: HyperPrior, seed: int | None = None) -> WorldDraw:
 
     # Parameters (priors must match Stan model exactly for SBC to be valid)
     Pi = _sample_pi_stan_prior(rng, L)
-    dwell_lambda = np.exp(rng.normal(np.log(3.0), 0.5, size=L))
-    alpha_activity = rng.normal(0.0, 1.5, size=(L, K))
+    dwell_lambda = np.exp(rng.normal(np.log(6.0), 0.5, size=L))  # synced to Stan: lognormal(log(6),0.5)
+    alpha_activity = rng.normal(-1.5, 1.5, size=(L, K))  # synced to Stan: N(-1.5,1.5); mean phi≈0.18
     alpha_activity[:, 0] = np.sort(alpha_activity[:, 0])  # order statistics — matches Stan ordered[L]
     # Detection: Stan parameterization — delta_raw/j_raw with observability slopes
     delta_raw = rng.normal(0.0, 1.0, size=S)
     j_raw = rng.normal(0.0, 1.0, size=S)
     delta_observability = rng.normal(0.0, 0.5, size=S)
     j_observability = rng.normal(0.0, 0.5, size=S)
-    kappa_plus = 0.5 + 0.5 * _logistic(rng.normal(0.0, 0.5, size=M))   # synced to Stan: normal(0,0.5)
-    kappa_minus = 0.5 + 0.5 * _logistic(rng.normal(0.0, 0.5, size=M))  # mean kappa ≈ 0.75 vs 0.87
+    kappa_plus = 0.5 + 0.5 * _logistic(rng.normal(1.0, 0.5, size=M))   # synced to Stan: normal(1,0.5) mean kappa≈0.87
+    kappa_minus = 0.5 + 0.5 * _logistic(rng.normal(1.0, 0.5, size=M))  # reverted: lower kappa↑Y-rate when P(b0)>P(b1)
     # init: softmax of normal(0,1) — same as Stan's log_softmax(init_raw)
     init_raw = rng.normal(0.0, 1.0, size=L)
     init = _softmax(init_raw)
