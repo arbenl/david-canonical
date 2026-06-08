@@ -243,7 +243,7 @@ model {
   ambiguity_plus ~ normal(0, 0.25);
   ambiguity_minus ~ normal(0, 0.25);
   item_ambiguity_raw ~ normal(0, 1);
-  sigma_item_ambiguity ~ normal(0, 0.5);
+  sigma_item_ambiguity ~ lognormal(-1.0, 0.6);  // keeps sigma away from 0; avoids Neal's funnel
   init_raw ~ normal(0, 1);
   to_vector(jump_raw) ~ normal(0, 1);
   dwell_lambda ~ lognormal(log(3), 0.5);

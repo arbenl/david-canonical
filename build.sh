@@ -47,14 +47,13 @@ if [ ! -f "${STAN_FILE}" ]; then
     echo "[david] ERROR: Stan file not found: ${STAN_FILE}"
     exit 1
 fi
-if [ -f "${STAN_EXE}" ]; then
-    echo "[david] Stan model already compiled: ${STAN_EXE}"
-else
-    echo "[david] Compiling Stan model via CmdStan make…"
-    make -C "${CMDSTAN_DIR}" \
-        "STANCFLAGS+=--filename-in-msg=m01_forward.stan" \
-        "${STAN_EXE}"
-    echo "[david] Stan binary compiled: ${STAN_EXE}"
-fi
+# Always recompile — Stan model changes (e.g. prior edits) must be reflected
+# in the baked binary. Compilation takes ~90s; build cache amortises this.
+echo "[david] Compiling Stan model via CmdStan make…"
+rm -f "${STAN_EXE}"   # remove stale binary so make rebuilds unconditionally
+make -C "${CMDSTAN_DIR}" \
+    "STANCFLAGS+=--filename-in-msg=m01_forward.stan" \
+    "${STAN_EXE}"
+echo "[david] Stan binary compiled: ${STAN_EXE}"
 
 echo "=== Build complete ==="

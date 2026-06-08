@@ -686,11 +686,12 @@ def run_fit(run_id: str | None = None) -> dict[str, Any]:
         data=data,
         chains=MIN_CHAINS,
         parallel_chains=1,          # run chains sequentially to cap peak RAM
-        iter_warmup=1000,
-        iter_sampling=1500,         # 6000 total draws → ESS ≥ 400 with ≥7% mixing rate
+        iter_warmup=2000,           # was 1000; more warmup → better mass-matrix adaptation
+        iter_sampling=3000,         # 12000 total draws → ESS ≥ 400 at ≥3.5% mixing rate
         seed=42,
-        adapt_delta=0.99,           # was 0.95; 0.99 eliminates the 1-divergence failure
-        max_treedepth=10,           # was 12 (4096 steps); 10 = 1024 steps, 4× less RAM
+        adapt_delta=0.95,           # reverted from 0.99 — high delta collapsed step size
+                                    # to near-zero, causing ESS=6.7 and rhat=1.58 (far worse)
+        max_treedepth=12,           # 4096 leapfrog steps max; helps complex geometry
         output_dir=str(fit_dir / "cmdstan"),
     )
 
