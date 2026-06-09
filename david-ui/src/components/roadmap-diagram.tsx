@@ -97,7 +97,7 @@ const STATUS_LABEL: Record<NodeStatus, string> = {
 
 function nodeCenter(n: NodeDef) { return { cx: n.x + NW / 2, cy: n.y + NH / 2 }; }
 
-export function RoadmapDiagram({ statuses }: { statuses: RoadmapStatuses }) {
+export function RoadmapDiagram({ statuses }: Readonly<{ statuses: RoadmapStatuses }>) {
   const [selected, setSelected] = useState<keyof RoadmapStatuses>("router");
   const sel = NODES.find((n) => n.id === selected)!;
 

@@ -89,7 +89,7 @@ function genRegime(seed: number, weights: Regime): Regime[] {
       bullish:  Math.max(0.05, weights.bullish  + 0.18 * Math.sin(t * Math.PI * 2 + seed)),
       bearish:  Math.max(0.05, weights.bearish  + 0.14 * Math.sin(t * Math.PI * 2.4 + seed + 1)),
       volatile: Math.max(0.05, weights.volatile + 0.12 * Math.sin(t * Math.PI * 3 + seed + 2)),
-      stable:   Math.max(0.05, weights.stable   + 0.10 * Math.sin(t * Math.PI * 1.7 + seed + 3)),
+      stable:   Math.max(0.05, weights.stable   + 0.1 * Math.sin(t * Math.PI * 1.7 + seed + 3)),
     };
     const sum = raw.bullish + raw.bearish + raw.volatile + raw.stable;
     out.push({
@@ -109,7 +109,7 @@ const BASE_MODELS: ModelData[] = [
     id: "router",
     name: "Forecast Router",
     probability: 71.4, direction: "up", expectedReturn: 12.8, riskScore: 34,
-    curve: genCurve(0.4, 0.68, 0.12, 0.10),
+    curve: genCurve(0.4, 0.68, 0.12, 0.1),
     regimeSeries: genRegime(0.5, { bullish: 0.42, bearish: 0.18, volatile: 0.22, stable: 0.18 }),
     routing: { davidAlpha: 64, deepNet: 36 },
     indicators: { volume: 78, vix: 41 },
@@ -120,7 +120,7 @@ const BASE_MODELS: ModelData[] = [
     name: "Macro Trends AI",
     probability: 58.2, direction: "up", expectedReturn: 8.1, riskScore: 52,
     curve: genCurve(1.7, 0.55, 0.16, 0.13),
-    regimeSeries: genRegime(2.1, { bullish: 0.30, bearish: 0.28, volatile: 0.24, stable: 0.18 }),
+    regimeSeries: genRegime(2.1, { bullish: 0.3, bearish: 0.28, volatile: 0.24, stable: 0.18 }),
     routing: { davidAlpha: 48, deepNet: 52 },
     indicators: { volume: 63, vix: 58 },
     accent: "#a78bfa",
@@ -129,8 +129,8 @@ const BASE_MODELS: ModelData[] = [
     id: "deepalpha",
     name: "DeepAlpha v4",
     probability: 81.9, direction: "up", expectedReturn: 19.4, riskScore: 47,
-    curve: genCurve(3.2, 0.78, 0.10, 0.08),
-    regimeSeries: genRegime(3.6, { bullish: 0.52, bearish: 0.12, volatile: 0.26, stable: 0.10 }),
+    curve: genCurve(3.2, 0.78, 0.1, 0.08),
+    regimeSeries: genRegime(3.6, { bullish: 0.52, bearish: 0.12, volatile: 0.26, stable: 0.1 }),
     routing: { davidAlpha: 41, deepNet: 59 },
     indicators: { volume: 88, vix: 33 },
     accent: "#34d399",
@@ -139,7 +139,7 @@ const BASE_MODELS: ModelData[] = [
     id: "arima",
     name: "ARIMA Hybrid",
     probability: 46.7, direction: "down", expectedReturn: -3.2, riskScore: 61,
-    curve: genCurve(4.9, 0.46, 0.20, 0.15),
+    curve: genCurve(4.9, 0.46, 0.2, 0.15),
     regimeSeries: genRegime(5.3, { bullish: 0.22, bearish: 0.34, volatile: 0.28, stable: 0.16 }),
     routing: { davidAlpha: 55, deepNet: 45 },
     indicators: { volume: 51, vix: 69 },
@@ -153,7 +153,7 @@ const BASE_MODELS: ModelData[] = [
 
 const W = 480, H = 180, PAD = 8;
 
-function ForecastAreaChart({ curve, accent }: { curve: CurvePoint[]; accent: string }) {
+function ForecastAreaChart({ curve, accent }: Readonly<{ curve: CurvePoint[]; accent: string }>) {
   const lo = Math.min(...curve.map((p) => p.lo95));
   const hi = Math.max(...curve.map((p) => p.hi95));
   const dom = [Math.max(0, lo - 0.04), Math.min(1, hi + 0.04)];
@@ -205,7 +205,7 @@ function ForecastAreaChart({ curve, accent }: { curve: CurvePoint[]; accent: str
       {/* median line, glowing */}
       <path d={midLine} fill="none" stroke={accent} strokeWidth="2.5" filter={`url(#${gid})`} />
       {/* leading dot */}
-      <circle cx={sx(curve[curve.length - 1].x)} cy={sy(curve[curve.length - 1].mid)} r="3.5" fill={accent} filter={`url(#${gid})`} />
+      <circle cx={sx(curve.at(-1)!.x)} cy={sy(curve.at(-1)!.mid)} r="3.5" fill={accent} filter={`url(#${gid})`} />
 
       {/* Theorem D-forecast: prior-dominated horizon tail (h > h*) is greyed + hatched */}
       {hasPriorDom && (
@@ -227,7 +227,7 @@ const REGIME_COLORS = {
   bullish: "#34d399", bearish: "#f87171", volatile: "#fbbf24", stable: "#38bdf8",
 } as const;
 
-function RegimeAreaChart({ series }: { series: Regime[] }) {
+function RegimeAreaChart({ series }: Readonly<{ series: Regime[] }>) {
   const sx = (x: number) => PAD + (x / N) * (W - 2 * PAD);
   const sy = (v: number) => H - PAD - v * (H - 2 * PAD);
 
@@ -259,7 +259,7 @@ function RegimeAreaChart({ series }: { series: Regime[] }) {
    Small UI helpers
 ──────────────────────────────────────────────────────────────────────────── */
 
-function Bar({ label, value, color }: { label: string; value: number; color: string }) {
+function Bar({ label, value, color }: Readonly<{ label: string; value: number; color: string }>) {
   return (
     <div>
       <div className="mb-1 flex justify-between text-[11px]">
@@ -274,10 +274,10 @@ function Bar({ label, value, color }: { label: string; value: number; color: str
   );
 }
 
-function CardShell({ title, children, explain }: {
+function CardShell({ title, children, explain }: Readonly<{
   title: string; children: React.ReactNode;
   explain?: { title: string; body: string; formula?: string; side?: "right" | "left" | "top" | "bottom" };
-}) {
+}>) {
   return (
     <div className="card-premium relative p-4">
       {explain && <ExplainDot {...explain} />}
@@ -327,24 +327,26 @@ function gateChipClass(status: string): string {
 /** Inject live data into the "router" model; the others stay illustrative. */
 function buildModels(realCurve: CurvePoint[] | null, realProbability: number | null): ModelData[] {
   return BASE_MODELS.map((m) => {
-    if (m.id !== ROUTER_ID) return m;
-    const curve = realCurve && realCurve.length > 1 ? realCurve : m.curve;
-    const probability = realProbability != null ? realProbability * 100 : m.probability;
-    const direction: "up" | "down" = probability >= 50 ? "up" : "down";
-    return { ...m, curve, probability, direction };
+    if (m.id === ROUTER_ID) {
+      const curve = realCurve && realCurve.length > 1 ? realCurve : m.curve;
+      const probability = realProbability != null ? realProbability * 100 : m.probability;
+      const direction: "up" | "down" = probability >= 50 ? "up" : "down";
+      return { ...m, curve, probability, direction };
+    }
+    return m;
   });
 }
 
 /* ── sub-components ───────────────────────────────────────────────────────── */
 
-function RouterHeader({ updatedAgo, usingMock, explain, onToggle }: {
+function RouterHeader({ updatedAgo, usingMock, explain, onToggle }: Readonly<{
   updatedAgo: string; usingMock: boolean; explain: boolean; onToggle: () => void;
-}) {
+}>) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-white">
-          FORECAST ROUTER <span className="text-slate-600">|</span>{" "}
+          {"FORECAST ROUTER"}{" "}<span className="text-slate-600">|</span>{" "}
           <span className="text-base font-medium text-slate-400">Performance Analytics &amp; Regime Allocation</span>
         </h1>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
@@ -376,7 +378,7 @@ function RouterHeader({ updatedAgo, usingMock, explain, onToggle }: {
             : "border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200"
         }`}
       >
-        🇦🇱 Shpjegimi
+        {"🇦🇱 Shpjegimi"}{" "}
         <span className={`text-[10px] uppercase ${explain ? "text-sky-300" : "text-slate-600"}`}>
           {explain ? "Aktiv" : "Joaktiv"}
         </span>
@@ -385,9 +387,9 @@ function RouterHeader({ updatedAgo, usingMock, explain, onToggle }: {
   );
 }
 
-function TrustBanner({ certified, sbcFail, usingMock }: {
+function TrustBanner({ certified, sbcFail, usingMock }: Readonly<{
   certified: boolean; sbcFail: boolean; usingMock: boolean;
-}) {
+}>) {
   if (usingMock) {
     return (
       <div className="flex items-center gap-2 rounded-xl border border-amber-700/50 bg-amber-950/30 px-4 py-2.5 text-sm font-medium text-amber-300">
@@ -409,10 +411,10 @@ function TrustBanner({ certified, sbcFail, usingMock }: {
   );
 }
 
-function ModelSelector({ models, activeId, onSelect, activeStratum, runId }: {
+function ModelSelector({ models, activeId, onSelect, activeStratum, runId }: Readonly<{
   models: ModelData[]; activeId: string; onSelect: (id: string) => void;
   activeStratum: string; runId: string | null;
-}) {
+}>) {
   return (
     <div className="flex shrink-0 flex-row gap-2 lg:w-52 lg:flex-col">
       <p className="hidden text-[11px] font-semibold uppercase tracking-wider text-slate-600 lg:block">Models</p>
@@ -461,7 +463,7 @@ function CalibrationLock() {
   );
 }
 
-function CurrentProbabilitiesCard({ model, explain }: { model: ModelData; explain: boolean }) {
+function CurrentProbabilitiesCard({ model, explain }: Readonly<{ model: ModelData; explain: boolean }>) {
   const up = model.direction === "up";
   return (
     <CardShell title="Current Probabilities" explain={explain ? EXPLAIN_CURRENT : undefined}>
@@ -496,10 +498,10 @@ function theoremLockMsg(aPrime: string, bPrime: string): string {
   return "Teorema dështoi. Kontrollo statusin e portave.";
 }
 
-function ForecastChartCard({ model, explain, theoremFail, sbcFail, aPrime, bPrime, hStar }: {
+function ForecastChartCard({ model, explain, theoremFail, sbcFail, aPrime, bPrime, hStar }: Readonly<{
   model: ModelData; explain: boolean; theoremFail: boolean; sbcFail: boolean;
   aPrime: string; bPrime: string; hStar: number | null;
-}) {
+}>) {
   return (
     <div className="card-premium relative p-4 md:col-span-1 xl:col-span-2">
       {explain && <ExplainDot {...EXPLAIN_CI} />}
@@ -533,7 +535,7 @@ function ForecastChartCard({ model, explain, theoremFail, sbcFail, aPrime, bPrim
   );
 }
 
-function RegimeCard({ model, explain }: { model: ModelData; explain: boolean }) {
+function RegimeCard({ model, explain }: Readonly<{ model: ModelData; explain: boolean }>) {
   return (
     <CardShell title="Regime Distribution" explain={explain ? EXPLAIN_REGIME : undefined}>
       <div className="h-28"><RegimeAreaChart series={model.regimeSeries} /></div>
@@ -549,9 +551,9 @@ function RegimeCard({ model, explain }: { model: ModelData; explain: boolean }) 
   );
 }
 
-function RoutingCard({ model, explain, aPrime, bPrime }: {
+function RoutingCard({ model, explain, aPrime, bPrime }: Readonly<{
   model: ModelData; explain: boolean; aPrime: string; bPrime: string;
-}) {
+}>) {
   return (
     <CardShell title="Active Routing Status" explain={explain ? EXPLAIN_ROUTING : undefined}>
       <div className="space-y-3">
@@ -566,7 +568,7 @@ function RoutingCard({ model, explain, aPrime, bPrime }: {
   );
 }
 
-function IndicatorsCard({ model }: { model: ModelData }) {
+function IndicatorsCard({ model }: Readonly<{ model: ModelData }>) {
   return (
     <CardShell title="Key Indicators">
       <div className="space-y-3">
@@ -580,7 +582,7 @@ function IndicatorsCard({ model }: { model: ModelData }) {
   );
 }
 
-export function ForecastRouter(props: RouterDataProps) {
+export function ForecastRouter(props: Readonly<RouterDataProps>) {
   const [activeId, setActiveId] = useState(ROUTER_ID);
   const [explain, setExplain] = useState(false);
 

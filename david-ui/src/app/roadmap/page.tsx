@@ -36,7 +36,7 @@ function routerStatusOf(theorem: NodeStatus, sbc: NodeStatus): NodeStatus {
 async function fetchTheoremGates(runId: string): Promise<{ aPrime: unknown; bPrime: unknown }> {
   const summary = await api.fitRun(runId).catch(() => null);
   const th = summary?.theorems ?? {};
-  const read = (k: string) => (th[k] as Record<string, unknown>)?.gate_status;
+  const read = (k: string) => th[k]?.gate_status;
   return { aPrime: read("A_prime"), bPrime: read("B_prime") };
 }
 

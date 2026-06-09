@@ -21,7 +21,7 @@ const legacy: NavLink[] = [
   { href: "/validate", label: "Validation",         icon: "✦" },
 ];
 
-function NavItem({ link, active }: { link: NavLink; active: boolean }) {
+function NavItem({ link, active }: Readonly<{ link: NavLink; active: boolean }>) {
   return (
     <Link
       href={link.href}

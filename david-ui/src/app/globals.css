@@ -10,6 +10,12 @@
   --pass: #34d399;
   --fail: #f87171;
   --skip: #fbbf24;
+  --premium-bg: #070b19;
+  --cyan: #22d3ee;
+  --emerald: #34d399;
+  --rose: #f87171;
+  --violet: #a78bfa;
+  --amber: #fbbf24;
 }
 
 body {
@@ -37,16 +43,6 @@ body {
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-
-/* ── Premium dashboard theme ─────────────────────────────────────────────── */
-:root {
-  --premium-bg: #070b19;
-  --cyan: #22d3ee;
-  --emerald: #34d399;
-  --rose: #f87171;
-  --violet: #a78bfa;
-  --amber: #fbbf24;
-}
 
 /* Neon text glows */
 .neon-cyan    { text-shadow: 0 0 10px rgba(34, 211, 238, 0.55); }

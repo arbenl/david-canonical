@@ -68,8 +68,9 @@ export default async function ForecastRouterPage() {
     if (summaryRes.status === "fulfilled") {
       const th = summaryRes.value.theorems ?? {};
       const theorem = (k: string) => (th[k] as Record<string, unknown> | undefined) ?? {};
-      aPrime = String(theorem("A_prime").gate_status ?? "skip");
-      bPrime = String(theorem("B_prime").gate_status ?? "skip");
+      const toStr = (v: unknown): string => (typeof v === "string" ? v : "skip");
+      aPrime = toStr(theorem("A_prime").gate_status);
+      bPrime = toStr(theorem("B_prime").gate_status);
       const hs = theorem("D_prime").h_star_months;
       if (typeof hs === "number") hStar = hs;
     }

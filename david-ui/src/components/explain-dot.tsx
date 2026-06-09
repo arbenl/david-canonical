@@ -3,14 +3,10 @@
 import { useState } from "react";
 
 interface Props {
-  /** Tooltip title in Albanian */
-  title: string;
-  /** Body text in Albanian — mathematically rigorous explanation */
-  body: string;
-  /** Optional formula / technical footnote line */
-  formula?: string;
-  /** Where the tooltip card opens relative to the dot */
-  side?: "right" | "left" | "top" | "bottom";
+  readonly title: string;
+  readonly body: string;
+  readonly formula?: string;
+  readonly side?: "right" | "left" | "top" | "bottom";
 }
 
 /**
