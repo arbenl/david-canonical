@@ -5,22 +5,66 @@
     "ingest_kind": "rss",
     "endpoint": "https://www.tobaccotactics.org/feed/",
     "refresh_cadence_days": 7,
-    "country_coverage": ["GLOBAL", "AL", "XK", "MK", "RS", "BA", "ME"],
-    "policy_coverage": ["taxation", "smoke_free", "marketing", "packaging", "fctc_5_3", "illicit_trade", "novel_products"],
-    "structural_independence": [
-      {"other_source_id": "balkan_insight_rss",    "independence_score": 0.90, "rationale": "independent civil-society tracker vs investigative journalism; different funding, data pipeline, and editorial methodology"},
-      {"other_source_id": "health_policy_watch_rss","independence_score": 0.85, "rationale": "both health-focused but different institutional affiliations and upstream sources"},
-      {"other_source_id": "who_news_rss",           "independence_score": 0.80, "rationale": "civil-society vs intergovernmental — different mandates; occasional shared WHO documents"},
-      {"other_source_id": "politico_eu_rss",         "independence_score": 0.92, "rationale": "academic civil-society tracker vs political journalism; fully different pipelines"},
-      {"other_source_id": "emerge_europe_rss",       "independence_score": 0.93, "rationale": "specialist tracker vs general regional business/politics media"},
-      {"other_source_id": "mk_meta_rss",             "independence_score": 0.95, "rationale": "global civil-society vs local Macedonian news outlet"},
-      {"other_source_id": "plos_medicine_rss",       "independence_score": 0.75, "rationale": "both reference academic literature; occasionally cite same studies"}
+    "country_coverage": [
+      "GLOBAL",
+      "AL",
+      "XK",
+      "MK",
+      "RS",
+      "BA",
+      "ME"
     ],
-    "rho_prior_mean": 0.70,
+    "policy_coverage": [
+      "taxation",
+      "smoke_free",
+      "marketing",
+      "packaging",
+      "fctc_5_3",
+      "illicit_trade",
+      "novel_products"
+    ],
+    "structural_independence": [
+      {
+        "other_source_id": "balkan_insight_rss",
+        "independence_score": 0.9,
+        "rationale": "independent civil-society tracker vs investigative journalism; different funding, data pipeline, and editorial methodology"
+      },
+      {
+        "other_source_id": "health_policy_watch_rss",
+        "independence_score": 0.85,
+        "rationale": "both health-focused but different institutional affiliations and upstream sources"
+      },
+      {
+        "other_source_id": "who_news_rss",
+        "independence_score": 0.8,
+        "rationale": "civil-society vs intergovernmental \u2014 different mandates; occasional shared WHO documents"
+      },
+      {
+        "other_source_id": "politico_eu_rss",
+        "independence_score": 0.92,
+        "rationale": "academic civil-society tracker vs political journalism; fully different pipelines"
+      },
+      {
+        "other_source_id": "emerge_europe_rss",
+        "independence_score": 0.93,
+        "rationale": "specialist tracker vs general regional business/politics media"
+      },
+      {
+        "other_source_id": "mk_meta_rss",
+        "independence_score": 0.95,
+        "rationale": "global civil-society vs local Macedonian news outlet"
+      },
+      {
+        "other_source_id": "plos_medicine_rss",
+        "independence_score": 0.75,
+        "rationale": "both reference academic literature; occasionally cite same studies"
+      }
+    ],
+    "rho_prior_mean": 0.7,
     "rho_prior_scale": 0.12,
     "delta_prior_mean": 0.05,
     "delta_prior_scale": 0.04,
-    "enabled": true
+    "enabled": false
   },
   {
     "source_id": "balkan_insight_rss",
@@ -28,19 +72,61 @@
     "ingest_kind": "rss",
     "endpoint": "https://balkaninsight.com/feed/",
     "refresh_cadence_days": 3,
-    "country_coverage": ["AL", "XK", "MK", "RS", "BA", "ME"],
-    "policy_coverage": ["taxation", "smoke_free", "marketing", "packaging", "fctc_5_3", "illicit_trade"],
+    "country_coverage": [
+      "AL",
+      "XK",
+      "MK",
+      "RS",
+      "BA",
+      "ME"
+    ],
+    "policy_coverage": [
+      "taxation",
+      "smoke_free",
+      "marketing",
+      "packaging",
+      "fctc_5_3",
+      "illicit_trade"
+    ],
     "structural_independence": [
-      {"other_source_id": "tobacco_tactics_rss",     "independence_score": 0.90, "rationale": "independent investigative journalism vs civil-society academic tracker"},
-      {"other_source_id": "health_policy_watch_rss", "independence_score": 0.88, "rationale": "regional investigative journalism vs global health policy media; independent editorial"},
-      {"other_source_id": "who_news_rss",            "independence_score": 0.95, "rationale": "independent journalism vs intergovernmental body; fully distinct pipelines"},
-      {"other_source_id": "politico_eu_rss",          "independence_score": 0.80, "rationale": "regional Balkans journalism vs EU political journalism; different geographic focus"},
-      {"other_source_id": "emerge_europe_rss",        "independence_score": 0.82, "rationale": "investigative journalism vs business/politics media; some story overlap on Balkans"},
-      {"other_source_id": "mk_meta_rss",              "independence_score": 0.70, "rationale": "regional outlet sometimes cites Balkan Insight; partial upstream overlap"},
-      {"other_source_id": "plos_medicine_rss",        "independence_score": 0.97, "rationale": "journalism vs peer-reviewed academic journal; fully independent pipelines"}
+      {
+        "other_source_id": "tobacco_tactics_rss",
+        "independence_score": 0.9,
+        "rationale": "independent investigative journalism vs civil-society academic tracker"
+      },
+      {
+        "other_source_id": "health_policy_watch_rss",
+        "independence_score": 0.88,
+        "rationale": "regional investigative journalism vs global health policy media; independent editorial"
+      },
+      {
+        "other_source_id": "who_news_rss",
+        "independence_score": 0.95,
+        "rationale": "independent journalism vs intergovernmental body; fully distinct pipelines"
+      },
+      {
+        "other_source_id": "politico_eu_rss",
+        "independence_score": 0.8,
+        "rationale": "regional Balkans journalism vs EU political journalism; different geographic focus"
+      },
+      {
+        "other_source_id": "emerge_europe_rss",
+        "independence_score": 0.82,
+        "rationale": "investigative journalism vs business/politics media; some story overlap on Balkans"
+      },
+      {
+        "other_source_id": "mk_meta_rss",
+        "independence_score": 0.7,
+        "rationale": "regional outlet sometimes cites Balkan Insight; partial upstream overlap"
+      },
+      {
+        "other_source_id": "plos_medicine_rss",
+        "independence_score": 0.97,
+        "rationale": "journalism vs peer-reviewed academic journal; fully independent pipelines"
+      }
     ],
     "rho_prior_mean": 0.15,
-    "rho_prior_scale": 0.10,
+    "rho_prior_scale": 0.1,
     "delta_prior_mean": 0.06,
     "delta_prior_scale": 0.05,
     "enabled": true
@@ -51,16 +137,59 @@
     "ingest_kind": "rss",
     "endpoint": "https://healthpolicy-watch.news/feed/",
     "refresh_cadence_days": 7,
-    "country_coverage": ["GLOBAL", "AL", "XK", "MK", "RS", "BA", "ME"],
-    "policy_coverage": ["taxation", "smoke_free", "marketing", "packaging", "fctc_5_3", "novel_products"],
+    "country_coverage": [
+      "GLOBAL",
+      "AL",
+      "XK",
+      "MK",
+      "RS",
+      "BA",
+      "ME"
+    ],
+    "policy_coverage": [
+      "taxation",
+      "smoke_free",
+      "marketing",
+      "packaging",
+      "fctc_5_3",
+      "novel_products"
+    ],
     "structural_independence": [
-      {"other_source_id": "tobacco_tactics_rss",     "independence_score": 0.85, "rationale": "health policy journalism vs civil-society academic tracker; different institutional affiliation"},
-      {"other_source_id": "balkan_insight_rss",      "independence_score": 0.88, "rationale": "global health journalism vs regional investigative journalism; distinct editorial"},
-      {"other_source_id": "who_news_rss",            "independence_score": 0.65, "rationale": "both cover WHO meetings; shared press-release upstream — lower independence"},
-      {"other_source_id": "politico_eu_rss",          "independence_score": 0.87, "rationale": "health-specialist journalism vs broad political journalism"},
-      {"other_source_id": "emerge_europe_rss",        "independence_score": 0.90, "rationale": "global health journalism vs regional business/politics media"},
-      {"other_source_id": "mk_meta_rss",              "independence_score": 0.96, "rationale": "global health journalism vs local Macedonian outlet; fully distinct"},
-      {"other_source_id": "plos_medicine_rss",        "independence_score": 0.80, "rationale": "journalism vs peer-reviewed academic; occasionally reference same studies"}
+      {
+        "other_source_id": "tobacco_tactics_rss",
+        "independence_score": 0.85,
+        "rationale": "health policy journalism vs civil-society academic tracker; different institutional affiliation"
+      },
+      {
+        "other_source_id": "balkan_insight_rss",
+        "independence_score": 0.88,
+        "rationale": "global health journalism vs regional investigative journalism; distinct editorial"
+      },
+      {
+        "other_source_id": "who_news_rss",
+        "independence_score": 0.65,
+        "rationale": "both cover WHO meetings; shared press-release upstream \u2014 lower independence"
+      },
+      {
+        "other_source_id": "politico_eu_rss",
+        "independence_score": 0.87,
+        "rationale": "health-specialist journalism vs broad political journalism"
+      },
+      {
+        "other_source_id": "emerge_europe_rss",
+        "independence_score": 0.9,
+        "rationale": "global health journalism vs regional business/politics media"
+      },
+      {
+        "other_source_id": "mk_meta_rss",
+        "independence_score": 0.96,
+        "rationale": "global health journalism vs local Macedonian outlet; fully distinct"
+      },
+      {
+        "other_source_id": "plos_medicine_rss",
+        "independence_score": 0.8,
+        "rationale": "journalism vs peer-reviewed academic; occasionally reference same studies"
+      }
     ],
     "rho_prior_mean": 0.35,
     "rho_prior_scale": 0.12,
@@ -74,16 +203,60 @@
     "ingest_kind": "rss",
     "endpoint": "https://www.who.int/rss-feeds/news-english.xml",
     "refresh_cadence_days": 14,
-    "country_coverage": ["GLOBAL", "AL", "XK", "MK", "RS", "BA", "ME"],
-    "policy_coverage": ["taxation", "smoke_free", "marketing", "packaging", "fctc_5_3", "novel_products", "illicit_trade"],
+    "country_coverage": [
+      "GLOBAL",
+      "AL",
+      "XK",
+      "MK",
+      "RS",
+      "BA",
+      "ME"
+    ],
+    "policy_coverage": [
+      "taxation",
+      "smoke_free",
+      "marketing",
+      "packaging",
+      "fctc_5_3",
+      "novel_products",
+      "illicit_trade"
+    ],
     "structural_independence": [
-      {"other_source_id": "tobacco_tactics_rss",      "independence_score": 0.80, "rationale": "intergovernmental body vs civil-society academic; different mandate and data pipeline"},
-      {"other_source_id": "balkan_insight_rss",       "independence_score": 0.95, "rationale": "intergovernmental vs investigative journalism; fully distinct pipelines"},
-      {"other_source_id": "health_policy_watch_rss",  "independence_score": 0.65, "rationale": "health_policy_watch covers WHO events — shared upstream documents"},
-      {"other_source_id": "politico_eu_rss",           "independence_score": 0.90, "rationale": "intergovernmental vs political journalism; distinct mandates"},
-      {"other_source_id": "emerge_europe_rss",         "independence_score": 0.93, "rationale": "intergovernmental vs regional business/politics media"},
-      {"other_source_id": "mk_meta_rss",               "independence_score": 0.97, "rationale": "global intergovernmental vs local Macedonian outlet"},
-      {"other_source_id": "plos_medicine_rss",         "independence_score": 0.75, "rationale": "both produce primary health data; some cross-citation of WHO statistics"}
+      {
+        "other_source_id": "tobacco_tactics_rss",
+        "independence_score": 0.8,
+        "rationale": "intergovernmental body vs civil-society academic; different mandate and data pipeline"
+      },
+      {
+        "other_source_id": "balkan_insight_rss",
+        "independence_score": 0.95,
+        "rationale": "intergovernmental vs investigative journalism; fully distinct pipelines"
+      },
+      {
+        "other_source_id": "health_policy_watch_rss",
+        "independence_score": 0.65,
+        "rationale": "health_policy_watch covers WHO events \u2014 shared upstream documents"
+      },
+      {
+        "other_source_id": "politico_eu_rss",
+        "independence_score": 0.9,
+        "rationale": "intergovernmental vs political journalism; distinct mandates"
+      },
+      {
+        "other_source_id": "emerge_europe_rss",
+        "independence_score": 0.93,
+        "rationale": "intergovernmental vs regional business/politics media"
+      },
+      {
+        "other_source_id": "mk_meta_rss",
+        "independence_score": 0.97,
+        "rationale": "global intergovernmental vs local Macedonian outlet"
+      },
+      {
+        "other_source_id": "plos_medicine_rss",
+        "independence_score": 0.75,
+        "rationale": "both produce primary health data; some cross-citation of WHO statistics"
+      }
     ],
     "rho_prior_mean": 0.25,
     "rho_prior_scale": 0.12,
@@ -97,16 +270,58 @@
     "ingest_kind": "rss",
     "endpoint": "https://www.politico.eu/feed/",
     "refresh_cadence_days": 3,
-    "country_coverage": ["AL", "MK", "RS", "ME", "BA", "XK"],
-    "policy_coverage": ["taxation", "smoke_free", "marketing", "packaging", "fctc_5_3", "novel_products"],
+    "country_coverage": [
+      "AL",
+      "MK",
+      "RS",
+      "ME",
+      "BA",
+      "XK"
+    ],
+    "policy_coverage": [
+      "taxation",
+      "smoke_free",
+      "marketing",
+      "packaging",
+      "fctc_5_3",
+      "novel_products"
+    ],
     "structural_independence": [
-      {"other_source_id": "tobacco_tactics_rss",      "independence_score": 0.92, "rationale": "EU political journalism vs civil-society academic tracker; fully distinct pipelines"},
-      {"other_source_id": "balkan_insight_rss",        "independence_score": 0.80, "rationale": "EU-wide political journalism vs Balkans investigative journalism; some geographic overlap"},
-      {"other_source_id": "health_policy_watch_rss",   "independence_score": 0.87, "rationale": "broad political journalism vs health-specialist journalism"},
-      {"other_source_id": "who_news_rss",              "independence_score": 0.90, "rationale": "political journalism vs intergovernmental body"},
-      {"other_source_id": "emerge_europe_rss",         "independence_score": 0.75, "rationale": "both cover European politics; some editorial overlap"},
-      {"other_source_id": "mk_meta_rss",               "independence_score": 0.90, "rationale": "EU political journalism vs local Macedonian outlet; distinct scope"},
-      {"other_source_id": "plos_medicine_rss",         "independence_score": 0.97, "rationale": "journalism vs peer-reviewed academic; fully independent"}
+      {
+        "other_source_id": "tobacco_tactics_rss",
+        "independence_score": 0.92,
+        "rationale": "EU political journalism vs civil-society academic tracker; fully distinct pipelines"
+      },
+      {
+        "other_source_id": "balkan_insight_rss",
+        "independence_score": 0.8,
+        "rationale": "EU-wide political journalism vs Balkans investigative journalism; some geographic overlap"
+      },
+      {
+        "other_source_id": "health_policy_watch_rss",
+        "independence_score": 0.87,
+        "rationale": "broad political journalism vs health-specialist journalism"
+      },
+      {
+        "other_source_id": "who_news_rss",
+        "independence_score": 0.9,
+        "rationale": "political journalism vs intergovernmental body"
+      },
+      {
+        "other_source_id": "emerge_europe_rss",
+        "independence_score": 0.75,
+        "rationale": "both cover European politics; some editorial overlap"
+      },
+      {
+        "other_source_id": "mk_meta_rss",
+        "independence_score": 0.9,
+        "rationale": "EU political journalism vs local Macedonian outlet; distinct scope"
+      },
+      {
+        "other_source_id": "plos_medicine_rss",
+        "independence_score": 0.97,
+        "rationale": "journalism vs peer-reviewed academic; fully independent"
+      }
     ],
     "rho_prior_mean": 0.12,
     "rho_prior_scale": 0.09,
@@ -120,18 +335,58 @@
     "ingest_kind": "rss",
     "endpoint": "https://emerging-europe.com/feed/",
     "refresh_cadence_days": 7,
-    "country_coverage": ["AL", "XK", "MK", "RS", "BA", "ME"],
-    "policy_coverage": ["taxation", "smoke_free", "marketing", "fctc_5_3"],
-    "structural_independence": [
-      {"other_source_id": "tobacco_tactics_rss",      "independence_score": 0.93, "rationale": "regional business/politics media vs civil-society academic tracker"},
-      {"other_source_id": "balkan_insight_rss",        "independence_score": 0.82, "rationale": "regional business/politics media vs investigative journalism; overlapping geography"},
-      {"other_source_id": "health_policy_watch_rss",   "independence_score": 0.90, "rationale": "regional business/politics media vs global health journalism"},
-      {"other_source_id": "who_news_rss",              "independence_score": 0.93, "rationale": "regional media vs intergovernmental body"},
-      {"other_source_id": "politico_eu_rss",           "independence_score": 0.75, "rationale": "both cover European politics; overlapping stories"},
-      {"other_source_id": "mk_meta_rss",               "independence_score": 0.80, "rationale": "regional European media vs local Macedonian outlet; partial overlap"},
-      {"other_source_id": "plos_medicine_rss",         "independence_score": 0.97, "rationale": "journalism vs peer-reviewed academic; fully independent"}
+    "country_coverage": [
+      "AL",
+      "XK",
+      "MK",
+      "RS",
+      "BA",
+      "ME"
     ],
-    "rho_prior_mean": 0.10,
+    "policy_coverage": [
+      "taxation",
+      "smoke_free",
+      "marketing",
+      "fctc_5_3"
+    ],
+    "structural_independence": [
+      {
+        "other_source_id": "tobacco_tactics_rss",
+        "independence_score": 0.93,
+        "rationale": "regional business/politics media vs civil-society academic tracker"
+      },
+      {
+        "other_source_id": "balkan_insight_rss",
+        "independence_score": 0.82,
+        "rationale": "regional business/politics media vs investigative journalism; overlapping geography"
+      },
+      {
+        "other_source_id": "health_policy_watch_rss",
+        "independence_score": 0.9,
+        "rationale": "regional business/politics media vs global health journalism"
+      },
+      {
+        "other_source_id": "who_news_rss",
+        "independence_score": 0.93,
+        "rationale": "regional media vs intergovernmental body"
+      },
+      {
+        "other_source_id": "politico_eu_rss",
+        "independence_score": 0.75,
+        "rationale": "both cover European politics; overlapping stories"
+      },
+      {
+        "other_source_id": "mk_meta_rss",
+        "independence_score": 0.8,
+        "rationale": "regional European media vs local Macedonian outlet; partial overlap"
+      },
+      {
+        "other_source_id": "plos_medicine_rss",
+        "independence_score": 0.97,
+        "rationale": "journalism vs peer-reviewed academic; fully independent"
+      }
+    ],
+    "rho_prior_mean": 0.1,
     "rho_prior_scale": 0.08,
     "delta_prior_mean": 0.04,
     "delta_prior_scale": 0.04,
@@ -143,16 +398,52 @@
     "ingest_kind": "rss",
     "endpoint": "https://meta.mk/feed/",
     "refresh_cadence_days": 3,
-    "country_coverage": ["MK"],
-    "policy_coverage": ["taxation", "smoke_free", "marketing", "packaging", "fctc_5_3"],
+    "country_coverage": [
+      "MK"
+    ],
+    "policy_coverage": [
+      "taxation",
+      "smoke_free",
+      "marketing",
+      "packaging",
+      "fctc_5_3"
+    ],
     "structural_independence": [
-      {"other_source_id": "tobacco_tactics_rss",      "independence_score": 0.95, "rationale": "local Macedonian news vs global civil-society tracker; fully distinct"},
-      {"other_source_id": "balkan_insight_rss",        "independence_score": 0.70, "rationale": "local outlet occasionally republishes Balkan Insight content — lower independence"},
-      {"other_source_id": "health_policy_watch_rss",   "independence_score": 0.96, "rationale": "local Macedonian news vs global health journalism; fully distinct"},
-      {"other_source_id": "who_news_rss",              "independence_score": 0.97, "rationale": "local news vs intergovernmental body; fully distinct"},
-      {"other_source_id": "politico_eu_rss",           "independence_score": 0.90, "rationale": "local Macedonian news vs EU political journalism"},
-      {"other_source_id": "emerge_europe_rss",         "independence_score": 0.80, "rationale": "local Macedonian news vs regional European media; some content overlap"},
-      {"other_source_id": "plos_medicine_rss",         "independence_score": 0.98, "rationale": "local journalism vs peer-reviewed academic; fully independent"}
+      {
+        "other_source_id": "tobacco_tactics_rss",
+        "independence_score": 0.95,
+        "rationale": "local Macedonian news vs global civil-society tracker; fully distinct"
+      },
+      {
+        "other_source_id": "balkan_insight_rss",
+        "independence_score": 0.7,
+        "rationale": "local outlet occasionally republishes Balkan Insight content \u2014 lower independence"
+      },
+      {
+        "other_source_id": "health_policy_watch_rss",
+        "independence_score": 0.96,
+        "rationale": "local Macedonian news vs global health journalism; fully distinct"
+      },
+      {
+        "other_source_id": "who_news_rss",
+        "independence_score": 0.97,
+        "rationale": "local news vs intergovernmental body; fully distinct"
+      },
+      {
+        "other_source_id": "politico_eu_rss",
+        "independence_score": 0.9,
+        "rationale": "local Macedonian news vs EU political journalism"
+      },
+      {
+        "other_source_id": "emerge_europe_rss",
+        "independence_score": 0.8,
+        "rationale": "local Macedonian news vs regional European media; some content overlap"
+      },
+      {
+        "other_source_id": "plos_medicine_rss",
+        "independence_score": 0.98,
+        "rationale": "local journalism vs peer-reviewed academic; fully independent"
+      }
     ],
     "rho_prior_mean": 0.12,
     "rho_prior_scale": 0.09,
@@ -166,20 +457,186 @@
     "ingest_kind": "rss",
     "endpoint": "https://journals.plos.org/plosmedicine/feed/atom",
     "refresh_cadence_days": 14,
-    "country_coverage": ["GLOBAL"],
-    "policy_coverage": ["taxation", "smoke_free", "marketing", "packaging", "fctc_5_3", "novel_products"],
-    "structural_independence": [
-      {"other_source_id": "tobacco_tactics_rss",      "independence_score": 0.75, "rationale": "both reference academic literature; occasionally cite same studies"},
-      {"other_source_id": "balkan_insight_rss",        "independence_score": 0.97, "rationale": "peer-reviewed academic vs investigative journalism; fully distinct"},
-      {"other_source_id": "health_policy_watch_rss",   "independence_score": 0.80, "rationale": "academic journal vs health journalism; some coverage overlap"},
-      {"other_source_id": "who_news_rss",              "independence_score": 0.75, "rationale": "both produce primary health evidence; WHO statistics cited in articles"},
-      {"other_source_id": "politico_eu_rss",           "independence_score": 0.97, "rationale": "academic journal vs political journalism; fully distinct pipelines"},
-      {"other_source_id": "emerge_europe_rss",         "independence_score": 0.97, "rationale": "academic journal vs regional business/politics media; fully distinct"},
-      {"other_source_id": "mk_meta_rss",               "independence_score": 0.98, "rationale": "global academic journal vs local Macedonian news; fully independent"}
+    "country_coverage": [
+      "GLOBAL"
     ],
-    "rho_prior_mean": 0.20,
-    "rho_prior_scale": 0.10,
+    "policy_coverage": [
+      "taxation",
+      "smoke_free",
+      "marketing",
+      "packaging",
+      "fctc_5_3",
+      "novel_products"
+    ],
+    "structural_independence": [
+      {
+        "other_source_id": "tobacco_tactics_rss",
+        "independence_score": 0.75,
+        "rationale": "both reference academic literature; occasionally cite same studies"
+      },
+      {
+        "other_source_id": "balkan_insight_rss",
+        "independence_score": 0.97,
+        "rationale": "peer-reviewed academic vs investigative journalism; fully distinct"
+      },
+      {
+        "other_source_id": "health_policy_watch_rss",
+        "independence_score": 0.8,
+        "rationale": "academic journal vs health journalism; some coverage overlap"
+      },
+      {
+        "other_source_id": "who_news_rss",
+        "independence_score": 0.75,
+        "rationale": "both produce primary health evidence; WHO statistics cited in articles"
+      },
+      {
+        "other_source_id": "politico_eu_rss",
+        "independence_score": 0.97,
+        "rationale": "academic journal vs political journalism; fully distinct pipelines"
+      },
+      {
+        "other_source_id": "emerge_europe_rss",
+        "independence_score": 0.97,
+        "rationale": "academic journal vs regional business/politics media; fully distinct"
+      },
+      {
+        "other_source_id": "mk_meta_rss",
+        "independence_score": 0.98,
+        "rationale": "global academic journal vs local Macedonian news; fully independent"
+      }
+    ],
+    "rho_prior_mean": 0.2,
+    "rho_prior_scale": 0.1,
     "delta_prior_mean": 0.03,
+    "delta_prior_scale": 0.03,
+    "enabled": true
+  },
+  {
+    "source_id": "tobacco_tactics_wp",
+    "family": "civil_society",
+    "ingest_kind": "wp_api",
+    "endpoint": "https://www.tobaccotactics.org/wp-json/wp/v2/posts",
+    "refresh_cadence_days": 7,
+    "country_coverage": [
+      "GLOBAL",
+      "AL",
+      "XK",
+      "MK",
+      "RS",
+      "BA",
+      "ME"
+    ],
+    "policy_coverage": [
+      "taxation",
+      "smoke_free",
+      "marketing",
+      "packaging",
+      "fctc_5_3",
+      "illicit_trade",
+      "novel_products"
+    ],
+    "structural_independence": [
+      {
+        "other_source_id": "tobacco_tactics_rss",
+        "independence_score": 0.1,
+        "rationale": "same source, different access method \u2014 treat as near-duplicate; only one should be enabled at a time"
+      },
+      {
+        "other_source_id": "balkan_insight_rss",
+        "independence_score": 0.9,
+        "rationale": "independent civil-society tracker vs investigative journalism"
+      },
+      {
+        "other_source_id": "health_policy_watch_rss",
+        "independence_score": 0.85,
+        "rationale": "civil-society vs global health journalism"
+      },
+      {
+        "other_source_id": "who_news_rss",
+        "independence_score": 0.8,
+        "rationale": "civil-society vs intergovernmental body"
+      },
+      {
+        "other_source_id": "tobacco_control_bmj",
+        "independence_score": 0.7,
+        "rationale": "both academic/civil-society; occasionally cite same studies"
+      },
+      {
+        "other_source_id": "mk_meta_rss",
+        "independence_score": 0.95,
+        "rationale": "global civil-society tracker vs local Macedonian news"
+      }
+    ],
+    "rho_prior_mean": 0.7,
+    "rho_prior_scale": 0.12,
+    "delta_prior_mean": 0.05,
+    "delta_prior_scale": 0.04,
+    "enabled": true
+  },
+  {
+    "source_id": "tobacco_control_bmj",
+    "family": "civil_society",
+    "ingest_kind": "rss",
+    "endpoint": "https://tobaccocontrol.bmj.com/rss/current.xml",
+    "refresh_cadence_days": 14,
+    "country_coverage": [
+      "GLOBAL",
+      "AL",
+      "XK",
+      "MK",
+      "RS",
+      "BA",
+      "ME"
+    ],
+    "policy_coverage": [
+      "taxation",
+      "smoke_free",
+      "marketing",
+      "packaging",
+      "fctc_5_3",
+      "novel_products",
+      "illicit_trade"
+    ],
+    "structural_independence": [
+      {
+        "other_source_id": "tobacco_tactics_rss",
+        "independence_score": 0.72,
+        "rationale": "peer-reviewed academic journal vs civil-society wiki tracker; some citation overlap"
+      },
+      {
+        "other_source_id": "tobacco_tactics_wp",
+        "independence_score": 0.72,
+        "rationale": "same as above \u2014 WP archive of tobacco_tactics_rss source"
+      },
+      {
+        "other_source_id": "balkan_insight_rss",
+        "independence_score": 0.97,
+        "rationale": "academic journal vs regional investigative journalism; fully independent"
+      },
+      {
+        "other_source_id": "health_policy_watch_rss",
+        "independence_score": 0.8,
+        "rationale": "peer-reviewed journal vs health journalism; some shared upstream evidence"
+      },
+      {
+        "other_source_id": "who_news_rss",
+        "independence_score": 0.75,
+        "rationale": "academic journal vs WHO; both produce primary health evidence"
+      },
+      {
+        "other_source_id": "plos_medicine_rss",
+        "independence_score": 0.65,
+        "rationale": "two peer-reviewed journals; some citation and topic overlap"
+      },
+      {
+        "other_source_id": "mk_meta_rss",
+        "independence_score": 0.98,
+        "rationale": "global academic journal vs local Macedonian news; fully distinct"
+      }
+    ],
+    "rho_prior_mean": 0.65,
+    "rho_prior_scale": 0.12,
+    "delta_prior_mean": 0.04,
     "delta_prior_scale": 0.03,
     "enabled": true
   }

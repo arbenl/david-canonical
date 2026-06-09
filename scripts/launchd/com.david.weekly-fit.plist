@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- DAVID/M0.1 — weekly fit + forecast + routing (Monday 04:00) -->
+  <key>Label</key>
+  <string>com.david.weekly-fit</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/arbenlila/development/david/canonical/scripts/weekly_fit.sh</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DATABASE_URL</key>
+    <string>postgresql://david:david@localhost:5544/david</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key>
+    <integer>1</integer>
+    <key>Hour</key>
+    <integer>4</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/arbenlila/development/david/canonical</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/arbenlila/development/david/canonical/data/logs/launchd_fit.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/arbenlila/development/david/canonical/data/logs/launchd_fit.err</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

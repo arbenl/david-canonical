@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- DAVID/M0.1 — nightly evidence ingest (runs 03:00 daily) -->
+  <key>Label</key>
+  <string>com.david.nightly-ingest</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/arbenlila/development/david/canonical/scripts/nightly_ingest.sh</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DATABASE_URL</key>
+    <string>postgresql://david:david@localhost:5544/david</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+    <!-- Add GROQ_API_KEY here once you have one for automated LLM coding -->
+    <!-- <key>GROQ_API_KEY</key> -->
+    <!-- <string>your-groq-api-key</string> -->
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>3</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/arbenlila/development/david/canonical</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/arbenlila/development/david/canonical/data/logs/launchd_ingest.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/arbenlila/development/david/canonical/data/logs/launchd_ingest.err</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

@@ -93,13 +93,15 @@ def get_scraper(source: Source) -> Scraper:
         2. Add the (family, ingest_kind) key to _DISPATCH below
     """
     from .scrapers.news_rss import RssScraper
+    from .scrapers.wordpress_api import WordpressApiScraper
 
     _DISPATCH: dict[tuple[str, str], type] = {
-        ("news",          "rss"): RssScraper,
-        ("civil_society", "rss"): RssScraper,
-        ("legislative",   "rss"): RssScraper,
-        ("transparency",  "rss"): RssScraper,
-        ("*",             "rss"): RssScraper,   # catch-all for RSS
+        ("news",          "rss"):    RssScraper,
+        ("civil_society", "rss"):    RssScraper,
+        ("legislative",   "rss"):    RssScraper,
+        ("transparency",  "rss"):    RssScraper,
+        ("*",             "rss"):    RssScraper,           # catch-all for RSS
+        ("*",             "wp_api"): WordpressApiScraper,  # WordPress REST API archive
     }
 
     key = (source.family, source.ingest_kind)

@@ -17,7 +17,7 @@
 #   make ui-install  Install Next.js dependencies
 # ─────────────────────────────────────────────────────────────────────────────
 
-.PHONY: dev dev-local api stop stop-all reset logs status ingest fit sbc falsify test ui-install help
+.PHONY: dev dev-local api stop stop-all reset logs status ingest fit sbc falsify test ui-install schedule unschedule help
 
 SHELL := /bin/bash
 
@@ -73,9 +73,10 @@ logs:
 
 status:
 	@echo "=== Port status ========================================="
-	@lsof -i :5432 -s TCP:LISTEN 2>/dev/null | grep -q LISTEN && echo "✓ Postgres  :5432" || echo "✗ Postgres  :5432  (not running)"
+	@lsof -i :5544 -s TCP:LISTEN 2>/dev/null | grep -q LISTEN && echo "✓ Postgres  :5544" || echo "✗ Postgres  :5544  (not running)"
 	@lsof -i :8080 -s TCP:LISTEN 2>/dev/null | grep -q LISTEN && echo "✓ FastAPI   :8080" || echo "✗ FastAPI   :8080  (not running)"
 	@lsof -i :3001 -s TCP:LISTEN 2>/dev/null | grep -q LISTEN && echo "✓ Next.js   :3001" || echo "✗ Next.js   :3001  (not running)"
+	@lsof -i :3000 -s TCP:LISTEN 2>/dev/null | grep -q LISTEN && echo "✓ Next.js   :3000" || true
 	@echo ""
 	@echo "=== Docker containers ==================================="
 	@docker compose ps 2>/dev/null || echo "(Docker not running)"
@@ -109,6 +110,18 @@ test:
 
 ui-install:
 	@cd david-ui && npm install
+
+# ── DB helpers ────────────────────────────────────────────────────────────────
+
+# ── Scheduling (macOS launchd — replaces Railway cron) ───────────────────────
+
+schedule:
+	@chmod +x scripts/launchd/install.sh
+	@./scripts/launchd/install.sh
+
+unschedule:
+	@chmod +x scripts/launchd/install.sh
+	@./scripts/launchd/install.sh uninstall
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
