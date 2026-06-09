@@ -41,6 +41,7 @@ SYNTHETIC_GENERATOR_STAN = STAN_ROOT / "synthetic_generator.stan"
 # Config artifacts
 SOURCE_REGISTRY = CONFIG_ROOT / "source_registry.json"
 SOURCE_INDEPENDENCE_LEDGER = CONFIG_ROOT / "source_independence_ledger.json"
+DOMAIN_TAXONOMY_REGISTRY = CONFIG_ROOT / "domain_taxonomy.json"
 PRE_REGISTRATION = CONFIG_ROOT / "m01_preregistration_v3.json"
 
 # Theorem floors (pre-registered; reviewed quarterly)

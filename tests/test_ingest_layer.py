@@ -147,7 +147,7 @@ def test_normalize_raw_writes_jsonl(tmp_path, monkeypatch):
     monkeypatch.setattr("david.ingest.normalize._upsert_to_db", lambda c, source_family: None)
     monkeypatch.setattr("david.ingest.sources.load_registry", lambda: [])
     # _make_raw() has no tobacco keywords; bypass the relevance filter for this unit test
-    monkeypatch.setattr("david.ingest.normalize.is_tobacco_relevant", lambda title, text: True)
+    monkeypatch.setattr("david.ingest.normalize.is_domain_relevant", lambda title, text: True)
 
     raw_file = tmp_path / "raw.jsonl"
     raw_file.write_text(
@@ -169,7 +169,7 @@ def test_normalize_raw_writes_jsonl(tmp_path, monkeypatch):
 def test_normalize_raw_db_error_writes_sidecar(tmp_path, monkeypatch):
     """When DB upsert fails, error sidecar is written but function returns normally."""
     monkeypatch.setattr("david.ingest.normalize.DATA_ROOT", tmp_path)
-    monkeypatch.setattr("david.ingest.normalize.is_tobacco_relevant", lambda title, text: True)
+    monkeypatch.setattr("david.ingest.normalize.is_domain_relevant", lambda title, text: True)
 
     def _failing_upsert(c, source_family):
         raise RuntimeError("connection refused")

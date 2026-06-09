@@ -71,78 +71,61 @@ _COUNTRY_ALIASES: dict[str, str] = {
     "unknown": "ZZ", "": "ZZ",
 }
 
-# Canonical policy areas; map aliases to the registered vocabulary.
-_POLICY_ALIASES: dict[str, str] = {
-    # ── Tobacco-specific policies (DAVID/M0.1 core vocabulary) ──────────────
-    "novel_products": "novel_products",       # e-cigs, nicotine pouches, HTP, snus
-    "illicit_trade": "illicit_trade",         # smuggling, contraband, black market
-    "fctc_5_3": "fctc_5_3",                   # Art. 5.3 — industry interference / lobbying
-    "packaging": "packaging",                 # plain packaging, health warnings
-    "marketing": "marketing",                 # advertising, sponsorship, display bans
-    "smoke_free": "smoke_free",               # indoor smoking bans, public-place rules
-    "taxation": "taxation",                   # excise duty, tobacco price policy
-    "general": "general",                     # tobacco policy (no specific sub-domain)
-    # ── Legacy / broader governance vocabulary ───────────────────────────────
-    "media freedom": "media_freedom",
-    "media_freedom": "media_freedom",
-    "press freedom": "media_freedom",
-    "freedom of press": "media_freedom",
-    "judicial independence": "judicial_independence",
-    "judiciary": "judicial_independence",
-    "rule of law": "rule_of_law",
-    "roe": "rule_of_law",
-    "corruption": "anti_corruption",
-    "anti-corruption": "anti_corruption",
-    "anti_corruption": "anti_corruption",
-    "civil society": "civil_society_space",
-    "civil_society": "civil_society_space",
-    "civil_society_space": "civil_society_space",
-    "ngos": "civil_society_space",
-    "elections": "electoral_integrity",
-    "electoral integrity": "electoral_integrity",
-    "electoral_integrity": "electoral_integrity",
-}
+def _load_policy_aliases() -> dict[str, str]:
+    from ..config import DOMAIN_TAXONOMY_REGISTRY
+    if not DOMAIN_TAXONOMY_REGISTRY.exists():
+        return {}
+    
+    with open(DOMAIN_TAXONOMY_REGISTRY) as f:
+        data = json.load(f)
+    
+    aliases = {}
+    for policy in data.get("policies", []):
+        for alias in policy.get("aliases", []):
+            aliases[alias.lower()] = policy["id"]
+    
+    # Legacy aliases (hardcoded fallback)
+    legacy = {
+        "media freedom": "media_freedom", "media_freedom": "media_freedom",
+        "press freedom": "media_freedom", "freedom of press": "media_freedom",
+        "judicial independence": "judicial_independence", "judiciary": "judicial_independence",
+        "rule of law": "rule_of_law", "roe": "rule_of_law",
+        "corruption": "anti_corruption", "anti-corruption": "anti_corruption",
+        "anti_corruption": "anti_corruption", "civil society": "civil_society_space",
+        "civil_society": "civil_society_space", "civil_society_space": "civil_society_space",
+        "ngos": "civil_society_space", "elections": "electoral_integrity",
+        "electoral integrity": "electoral_integrity", "electoral_integrity": "electoral_integrity"
+    }
+    return {**legacy, **aliases}
+
+_POLICY_ALIASES: dict[str, str] = _load_policy_aliases()
 _POLICY_DEFAULT = "general"
 
 # Observability score per tier (pre-registered in ARCHITECTURE.md §3.2)
 _TIER_TO_I_O: dict[int, float] = {0: 0.30, 1: 0.50, 2: 0.70, 3: 0.90}
 
-# ─── tobacco relevance pre-filter ────────────────────────────────────────────
-# Items that match at least one keyword are considered potentially relevant to
-# tobacco industry political interference and are forwarded to LLM coding + DB.
-# Items that match none are written to the JSON-L audit trail but NOT upserted
-# to Postgres, preventing non-tobacco noise from diluting strata.
-#
-# Design: conservative (prefer false-positives over false-negatives).
-# Substring matching — "tobacco" catches "tobacco industry", "tobacco company" etc.
-_TOBACCO_KEYWORDS: frozenset[str] = frozenset({
-    # Products
-    "tobacco", "cigarette", "cigar", "smokeless", "snus", "snuff",
-    "nicotine", "vaping", "vape", "e-cigarette", "ecig", "e-cig",
-    "iqos", "heated tobacco", "heat-not-burn", "htp", "juul",
-    # Companies
-    "philip morris", "altria", "british american tobacco",
-    "japan tobacco", "jti", "reynolds", "imperial tobacco", "imperial brands",
-    "lorillard", "scandinavian tobacco",
-    # Policy / regulation
-    "fctc", "tobacco control", "plain packaging", "menthol ban",
-    "flavour ban", "flavor ban", "tobacco tax", "tobacco duty",
-    "smoke-free", "smoking ban", "tobacco advertising",
-    "illicit tobacco", "tobacco smuggling",
-    # Interference / lobbying
-    "tobacco lobby", "industry interference", "tobacco industry",
-})
+def _load_relevance_keywords() -> frozenset[str]:
+    from ..config import DOMAIN_TAXONOMY_REGISTRY
+    if not DOMAIN_TAXONOMY_REGISTRY.exists():
+        return frozenset()
+    with open(DOMAIN_TAXONOMY_REGISTRY) as f:
+        data = json.load(f)
+    return frozenset(kw.lower() for kw in data.get("relevance_keywords", []))
 
+_DOMAIN_KEYWORDS: frozenset[str] = _load_relevance_keywords()
 
-def is_tobacco_relevant(title: str, text: str) -> bool:
-    """Return True if title+text plausibly relates to tobacco industry interference.
+def is_domain_relevant(title: str, text: str) -> bool:
+    """Return True if title+text plausibly relates to the registered domain.
 
-    Uses fast substring matching against a pre-compiled keyword set.
+    Uses fast substring matching against the domain_taxonomy.json keyword set.
     Conservative: prefers false-positives over false-negatives so that
     borderline items still reach LLM coding for final classification.
     """
+    if not _DOMAIN_KEYWORDS:
+        return True  # If no keywords configured, everything is relevant
+        
     combined = (title + " " + text).lower()
-    return any(kw in combined for kw in _TOBACCO_KEYWORDS)
+    return any(kw in combined for kw in _DOMAIN_KEYWORDS)
 
 
 # ─── schema ──────────────────────────────────────────────────────────────────
@@ -300,10 +283,10 @@ def normalize_raw(raw_paths: list[Path]) -> list[CanonicalEvidence]:
                 # Always write to JSON-L (audit trail — complete record of scrape)
                 f.write(canon.model_dump_json() + "\n")
 
-                # Tobacco relevance pre-filter: skip non-tobacco items from DB + coding.
+                # Domain relevance pre-filter: skip irrelevant items from DB + coding.
                 # gl_* strata are non-tobacco by construction (PLOS Medicine RSS).
-                # Keyword filter catches other non-tobacco items from mixed-content feeds.
-                if canon.stratum_id.startswith("gl_") or not is_tobacco_relevant(canon.title, canon.text):
+                # Keyword filter catches other irrelevant items from mixed-content feeds.
+                if canon.stratum_id.startswith("gl_") or not is_domain_relevant(canon.title, canon.text):
                     continue  # don't upsert; don't add to returned records
 
                 records.append(canon)

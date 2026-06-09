@@ -1,0 +1,68 @@
+{
+  "domain": "tobacco_control",
+  "relevance_keywords": [
+    "tobacco", "cigarette", "cigar", "smokeless", "snus", "snuff",
+    "nicotine", "vaping", "vape", "e-cigarette", "ecig", "e-cig",
+    "iqos", "heated tobacco", "heat-not-burn", "htp", "juul",
+    "philip morris", "altria", "british american tobacco",
+    "japan tobacco", "jti", "reynolds", "imperial tobacco", "imperial brands",
+    "lorillard", "scandinavian tobacco",
+    "fctc", "tobacco control", "plain packaging", "menthol ban",
+    "flavour ban", "flavor ban", "tobacco tax", "tobacco duty",
+    "smoke-free", "smoking ban", "tobacco advertising",
+    "illicit tobacco", "tobacco smuggling",
+    "tobacco lobby", "industry interference", "tobacco industry"
+  ],
+  "policies": [
+    {
+      "id": "monitor",
+      "regex": "\\b(monitor\\s+tobacco|tobacco\\s+use\\s+data|surveillance\\s+system|prevalence\\s+data)\\b",
+      "aliases": ["monitor", "monitoring"]
+    },
+    {
+      "id": "smoke_free",
+      "regex": "\\b(smoke.?free|smoking\\s+ban|indoor\\s+smok|public\\s+place|bar\\s+ban|restaurant\\s+ban|hospitality\\s+ban|secondhand\\s+smoke|passive\\s+smok|workplace\\s+smok)\\b",
+      "aliases": ["smoke_free", "protect"]
+    },
+    {
+      "id": "offer_help",
+      "regex": "\\b(cessation|quit\\s+line|quit\\s+smoking|nicotine\\s+replacement\\s+therapy|nrt|offer\\s+help|treatment\\s+program)\\b",
+      "aliases": ["offer_help", "cessation"]
+    },
+    {
+      "id": "warn",
+      "regex": "\\b(plain\\s+packag|standardi[sz]ed\\s+packag|health\\s+warning|graphic\\s+warning|label|pictorial\\s+warn|mass\\s+media\\s+campaign)\\b",
+      "aliases": ["warn", "packaging"]
+    },
+    {
+      "id": "marketing",
+      "regex": "\\b(advertis|promot|sponsor|brand\\s+display|point.of.sale|social\\s+media\\s+market|influencer|tobacco\\s+ad)\\b",
+      "aliases": ["marketing", "enforce_bans"]
+    },
+    {
+      "id": "taxation",
+      "regex": "\\b(tax|duty|excise|price\\s+increase|minimum\\s+price)\\b",
+      "aliases": ["taxation", "raise_taxes", "tax"]
+    },
+    {
+      "id": "fctc_5_3",
+      "regex": "\\b(FCTC|article\\s+5\\.3|5\\.3|industry\\s+interfer|tobacco\\s+lobby|Philip\\s+Morris|British\\s+American\\s+Tobacco|BAT\\b|PMI\\b|Japan\\s+Tobacco|Imperial\\s+Brands|conflict\\s+of\\s+interest|revolving\\s+door|front\\s+group|astroturf)\\b",
+      "aliases": ["fctc_5_3"]
+    },
+    {
+      "id": "illicit_trade",
+      "regex": "\\b(illicit\\s+trad|smuggl|contraband|counterfeit|black\\s+market|trafick|bootleg|tax.?stamp\\s+fraud)\\b",
+      "aliases": ["illicit_trade", "smuggling"]
+    },
+    {
+      "id": "novel_products",
+      "regex": "\\b(nicotine\\s+pouch|oral\\s+nicotine|snus|e.?cigarette|vap(e|ing|or)|heated\\s+tobacco|IQOS|HTP|heat.not.burn|ZYN|Lyft|Velo|Zyn|oral\\s+tobacco|tobacco.free\\s+pouch|pouche?s?\\s+de\\s+nicotine)\\b",
+      "aliases": ["novel_products", "e-cigarettes", "vaping"]
+    },
+    {
+      "id": "general",
+      "regex": null,
+      "aliases": ["general"]
+    }
+  ]
+}

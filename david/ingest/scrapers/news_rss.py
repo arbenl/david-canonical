@@ -65,48 +65,21 @@ _COUNTRY_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 
 # ── Policy keyword tagger ──────────────────────────────────────────────────
 # Maps policy slug → regex; first match wins.
-_POLICY_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("novel_products", re.compile(
-        r"\b(nicotine\s+pouch|oral\s+nicotine|snus|e.?cigarette|vap(e|ing|or)|"
-        r"heated\s+tobacco|IQOS|HTP|heat.not.burn|ZYN|Lyft|Velo|Zyn|"
-        r"oral\s+tobacco|tobacco.free\s+pouch|pouche?s?\s+de\s+nicotine)\b",
-        re.IGNORECASE
-    )),
-    ("illicit_trade", re.compile(
-        r"\b(illicit\s+trad|smuggl|contraband|counterfeit|black\s+market|"
-        r"trafick|bootleg|tax.?stamp\s+fraud)\b",
-        re.IGNORECASE
-    )),
-    ("fctc_5_3", re.compile(
-        r"\b(FCTC|article\s+5\.3|5\.3|industry\s+interfer|tobacco\s+lobby|"
-        r"Philip\s+Morris|British\s+American\s+Tobacco|BAT\b|PMI\b|"
-        r"Japan\s+Tobacco|Imperial\s+Brands|conflict\s+of\s+interest|"
-        r"revolving\s+door|front\s+group|astroturf)\b",
-        re.IGNORECASE
-    )),
-    ("packaging", re.compile(
-        r"\b(plain\s+packag|standardi[sz]ed\s+packag|health\s+warning|"
-        r"graphic\s+warning|label|pictorial\s+warn)\b",
-        re.IGNORECASE
-    )),
-    ("marketing", re.compile(
-        r"\b(advertis|promot|sponsor|brand\s+display|point.of.sale|"
-        r"social\s+media\s+market|influencer|tobacco\s+ad)\b",
-        re.IGNORECASE
-    )),
-    ("smoke_free", re.compile(
-        r"\b(smoke.?free|smoking\s+ban|indoor\s+smok|public\s+place|"
-        r"bar\s+ban|restaurant\s+ban|hospitality\s+ban|secondhand\s+smoke|"
-        r"passive\s+smok|workplace\s+smok)\b",
-        re.IGNORECASE
-    )),
-    ("taxation", re.compile(
-        r"\b(excise|tobacco\s+tax|cigarette\s+tax|price\s+increas|"
-        r"tax\s+increase|affordab|fiscal\s+polic|duty\s+on\s+tobacco|"
-        r"tobacco\s+pric)\b",
-        re.IGNORECASE
-    )),
-]
+def _load_policy_patterns() -> list[tuple[str, re.Pattern[str]]]:
+    from ...config import DOMAIN_TAXONOMY_REGISTRY
+    import json
+    if not DOMAIN_TAXONOMY_REGISTRY.exists():
+        return []
+    with open(DOMAIN_TAXONOMY_REGISTRY) as f:
+        data = json.load(f)
+    patterns = []
+    for policy in data.get("policies", []):
+        regex_str = policy.get("regex")
+        if regex_str:
+            patterns.append((policy["id"], re.compile(regex_str, re.IGNORECASE)))
+    return patterns
+
+_POLICY_PATTERNS: list[tuple[str, re.Pattern[str]]] = _load_policy_patterns()
 
 
 def _tag_country(text: str, coverage: list[str]) -> str:
