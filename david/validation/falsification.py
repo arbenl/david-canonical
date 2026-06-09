@@ -28,8 +28,8 @@ from ..simulator.adversarial_battery import run_battery
 
 def run_falsification() -> dict[str, Any]:
     """Top-level: collect inputs, run battery, write ledger."""
-    fit_dir = _latest_dir(FITS_DIR)
-    forecast_dir = _latest_dir(FORECASTS_DIR)
+    fit_dir = _latest_fit_dir(FITS_DIR)
+    forecast_dir = _latest_forecast_dir(FORECASTS_DIR, fit_dir)
     if fit_dir is None:
         return {"gate_status": "fail", "reason": "no_fit_to_falsify"}
 
@@ -51,11 +51,62 @@ def run_falsification() -> dict[str, Any]:
     }
 
 
-def _latest_dir(root: Path) -> Path | None:
+def _latest_fit_dir(root: Path) -> Path | None:
+    """Return the most recent *passing* fit dir, sorted by fit_summary timestamp.
+
+    Mirrors forecast.py::latest_fit_dir — filters to dirs with fit_summary.json
+    and gate_status == 'pass', then picks the latest by recorded timestamp.
+    Falls back to alphabetical sort if timestamps are absent.
+    """
     if not root.exists():
         return None
-    candidates = sorted(p for p in root.iterdir() if p.is_dir())
-    return candidates[-1] if candidates else None
+
+    def _ts(p: Path) -> str:
+        try:
+            return json.loads((p / "fit_summary.json").read_text()).get("timestamp", "")
+        except Exception:
+            return ""
+
+    candidates = [
+        p for p in root.iterdir()
+        if p.is_dir()
+        and (p / "fit_summary.json").exists()
+        and json.loads((p / "fit_summary.json").read_text()).get("gate_status") == "pass"
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=_ts)
+
+
+def _latest_forecast_dir(root: Path, fit_dir: Path | None) -> Path | None:
+    """Return the forecast dir for the most recent passing fit.
+
+    Prefers the dir whose name matches fit_dir.name (same run_id).  Falls back
+    to the alphabetically latest dir that contains cells_h*.json files.
+    """
+    if not root.exists():
+        return None
+    # Best: exact match on run_id
+    if fit_dir is not None:
+        exact = root / fit_dir.name
+        if exact.is_dir() and list(exact.glob("cells_h*.json")):
+            return exact
+    # Fallback: any dir containing forecast cells, sorted by fit_summary timestamp
+    candidates = [
+        p for p in root.iterdir()
+        if p.is_dir() and list(p.glob("cells_h*.json"))
+    ]
+    if not candidates:
+        return None
+
+    def _ts(p: Path) -> str:
+        fit_summary = FITS_DIR / p.name / "fit_summary.json"
+        try:
+            return json.loads(fit_summary.read_text()).get("timestamp", "")
+        except Exception:
+            return p.name
+
+    return max(candidates, key=_ts)
 
 
 def _assemble_inputs(fit_dir: Path, forecast_dir: Path | None) -> dict[str, dict]:
@@ -128,7 +179,7 @@ def _assemble_inputs(fit_dir: Path, forecast_dir: Path | None) -> dict[str, dict
                 h_val = int(p.stem.split("_h")[-1])
                 cells = json.loads(p.read_text())
                 for c in cells:
-                    beyond_p.append(float(c.get("p_forecast", float("nan"))))
+                    beyond_p.append(float(c.get("p_active", float("nan"))))
                     marginal_p.append(float(c.get("p_marginal", float("nan"))))
                     mask.append(h_val > h_star)
             except Exception:

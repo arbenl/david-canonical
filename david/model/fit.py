@@ -9,6 +9,8 @@ Output: data/fits/{run_id}/{fit_summary.json, draws.parquet, diagnostics.json}.
 from __future__ import annotations
 
 import json
+import logging
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -25,6 +27,70 @@ from ..config import (
 )
 
 _COMPILED_MODEL: CmdStanModel | None = None
+
+log = logging.getLogger(__name__)
+
+_SUMMARY_TIMEOUT_S = 120  # stansummary subprocess timeout; falls back to arviz
+
+
+def _safe_fit_summary(fit, timeout_s: int = _SUMMARY_TIMEOUT_S):
+    """Call fit.summary() with a hard timeout.
+
+    cmdstanpy delegates to the ``stansummary`` subprocess via popen.  When the
+    Python process is started in a backgrounded terminal the subprocess can
+    inherit a broken stdout pipe and hang indefinitely (0 CPU, infinite wall
+    time).  We guard with a thread-based timeout and fall back to computing
+    R-hat / ESS from the raw draws via arviz — identical diagnostics, no
+    subprocess.
+    """
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        future = ex.submit(fit.summary)
+        try:
+            return future.result(timeout=timeout_s)
+        except FuturesTimeoutError:
+            log.warning(
+                "fit.summary() timed out after %ds — falling back to arviz diagnostics.",
+                timeout_s,
+            )
+            return _arviz_summary_fallback(fit)
+
+
+def _arviz_summary_fallback(fit):
+    """Compute R-hat and ESS from draws using arviz when stansummary hangs.
+
+    Returns a DataFrame with the same columns as fit.summary() so the calling
+    code needs no changes:  R_hat, ESS_bulk, ESS_tail.
+    """
+    import pandas as pd
+
+    try:
+        import arviz as az
+
+        draws = fit.draws()  # shape (chains, draws, params)
+        param_names = fit.column_names
+        # arviz expects (chains, draws, params)
+        idata = az.from_cmdstanpy(fit)
+        summary_az = az.summary(idata, var_names=None, kind="diagnostics")
+        # Rename columns to match cmdstanpy convention
+        col_map = {
+            "r_hat": "R_hat",
+            "ess_bulk": "ESS_bulk",
+            "ess_tail": "ESS_tail",
+        }
+        summary_az = summary_az.rename(columns=col_map)
+        # Ensure required columns exist
+        for col in ("R_hat", "ESS_bulk", "ESS_tail"):
+            if col not in summary_az.columns:
+                summary_az[col] = float("nan")
+        log.info("arviz fallback produced summary for %d parameters.", len(summary_az))
+        return summary_az
+    except Exception as exc:
+        log.error("arviz fallback failed (%s) — returning worst-case summary.", exc)
+        # Return a minimal DataFrame that will trigger gate failures (fail-closed).
+        return pd.DataFrame(
+            {"R_hat": [2.0], "ESS_bulk": [0.0], "ESS_tail": [0.0]},
+            index=["fallback_error"],
+        )
 
 
 _CMDSTAN_VERSION = "2.39.0"
@@ -718,7 +784,7 @@ def run_fit(run_id: str | None = None, quick: bool = False) -> dict[str, Any]:
     fit = model.sample(
         data=data,
         chains=MIN_CHAINS,
-        parallel_chains=1,          # run chains sequentially to cap peak RAM
+        parallel_chains=MIN_CHAINS,  # run all chains in parallel (M4 local — no Railway RAM cap)
         iter_warmup=warmup,
         iter_sampling=sampling,
         seed=42,
@@ -728,7 +794,7 @@ def run_fit(run_id: str | None = None, quick: bool = False) -> dict[str, Any]:
         output_dir=str(fit_dir / "cmdstan"),
     )
 
-    summary = fit.summary()
+    summary = _safe_fit_summary(fit)
 
     rhat_max = float(summary["R_hat"].dropna().max())
     bulk_ess_min = float(summary["ESS_bulk"].dropna().min())

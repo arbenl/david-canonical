@@ -129,10 +129,48 @@ export const api = {
   },
   queue:         () => get<Queue>("/queue"),
   sbc:           () => get<{ measurement?: SbcResult; forecast?: SbcResult }>("/sbc"),
-  config:        () => get<ConfigValues>("/config"),
+  config:              () => get<ConfigValues>("/config"),
+  approveRun:          (run_id: string) => {
+    const base = typeof window === "undefined"
+      ? (process.env.DAVID_API_URL ?? "http://localhost:8080")
+      : "";
+    return fetch(`${base}/forecasts/${run_id}/approve`, {
+      method: "POST",
+      headers: { Authorization: process.env.PIPELINE_SECRET ?? "" },
+    }).then((r) => r.json());
+  },
+  sourceIndependence:  () => get<SourceIndependence>("/sources/independence"),
+  automationStatus:    () => get<AutomationStatus>("/automation/status"),
 };
 
-// ── SWR fetcher ────────────────────────────────────────────────────────────
+
+export interface AutomationStage {
+  last_run: string | null;
+  stale: boolean;
+  launchd: "loaded" | "not_loaded" | "unknown";
+}
+
+export interface AutomationStatus {
+  nightly_ingest: AutomationStage & { threshold_hours: number };
+  weekly_fit: AutomationStage & { threshold_days: number; last_passing_run_id: string | null };
+  checked_at: string;
+}
+
+export interface SourceIndependence {
+  version: string;
+  reviewed_at: string;
+  next_review_due: string;
+  stale: boolean;
+  days_since_review: number | null;
+  staleness_threshold_days: number;
+  effective_independent_sources: { s_eff: number; status: string };
+  sources: Array<{
+    source_id: string;
+    family: string;
+    independence_scores: Array<{ vs: string; score: number; rationale: string }>;
+  }>;
+}
+
 export const fetcher = (url: string) =>
   fetch(url).then((r) => {
     if (!r.ok) throw new Error(`${r.status}`);

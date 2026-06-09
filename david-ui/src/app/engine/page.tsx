@@ -10,8 +10,16 @@ function gv(summary: any, path: string[]): any {
 }
 
 export default async function EnginePage() {
-  const runsRes = await api.fitRuns(1).catch(() => null);
-  const latestRun = runsRes?.fit_runs?.[0];
+  const [runsRes, automationRes, independenceRes] = await Promise.allSettled([
+    api.fitRuns(1),
+    api.automationStatus(),
+    api.sourceIndependence(),
+  ]);
+  const runsData   = runsRes.status   === "fulfilled" ? runsRes.value   : null;
+  const automation = automationRes.status === "fulfilled" ? automationRes.value : null;
+  const independence = independenceRes.status === "fulfilled" ? independenceRes.value : null;
+
+  const latestRun = runsData?.fit_runs?.[0];
   const summary = latestRun
     ? await api.fitRun(latestRun.run_id).catch(() => null)
     : null;
@@ -149,6 +157,120 @@ export default async function EnginePage() {
             </div>
           </div>
         </div>
+      </section>
+
+      {/* Automation status */}
+      <section>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">
+          Automation status
+        </h2>
+        {automation ? (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {/* Nightly ingest */}
+            <div className={`rounded-xl border p-4 ${
+              automation.nightly_ingest.stale
+                ? "border-amber-700/50 bg-amber-900/10"
+                : "border-emerald-700/50 bg-emerald-900/10"
+            }`}>
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Nightly Ingest</p>
+                  <p className={`mt-1 text-sm font-medium ${
+                    automation.nightly_ingest.stale ? "text-amber-300" : "text-emerald-300"
+                  }`}>
+                    {automation.nightly_ingest.stale ? "⚠ Stale" : "✓ Current"}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {automation.nightly_ingest.last_run
+                      ? `Last: ${new Date(automation.nightly_ingest.last_run).toLocaleString()}`
+                      : "No log found"}
+                  </p>
+                </div>
+                <span className={`rounded px-2 py-0.5 text-xs font-mono ${
+                  automation.nightly_ingest.launchd === "loaded"
+                    ? "bg-emerald-900/40 text-emerald-400"
+                    : "bg-red-900/40 text-red-400"
+                }`}>
+                  {automation.nightly_ingest.launchd}
+                </span>
+              </div>
+            </div>
+            {/* Weekly fit */}
+            <div className={`rounded-xl border p-4 ${
+              automation.weekly_fit.stale
+                ? "border-amber-700/50 bg-amber-900/10"
+                : "border-emerald-700/50 bg-emerald-900/10"
+            }`}>
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Weekly Fit</p>
+                  <p className={`mt-1 text-sm font-medium ${
+                    automation.weekly_fit.stale ? "text-amber-300" : "text-emerald-300"
+                  }`}>
+                    {automation.weekly_fit.stale ? "⚠ Stale" : "✓ Current"}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {automation.weekly_fit.last_run
+                      ? `Last pass: ${new Date(automation.weekly_fit.last_run).toLocaleString()}`
+                      : "No passing fit yet"}
+                  </p>
+                </div>
+                <span className={`rounded px-2 py-0.5 text-xs font-mono ${
+                  automation.weekly_fit.launchd === "loaded"
+                    ? "bg-emerald-900/40 text-emerald-400"
+                    : "bg-red-900/40 text-red-400"
+                }`}>
+                  {automation.weekly_fit.launchd}
+                </span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-slate-500">Automation status unavailable.</p>
+        )}
+      </section>
+
+      {/* Source independence */}
+      <section>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">
+          Source structural independence (Theorem A′)
+        </h2>
+        {independence ? (
+          <div className="rounded-xl border border-slate-700/60 bg-slate-900/40 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className={`rounded-full px-3 py-0.5 text-xs font-semibold ${
+                  independence.effective_independent_sources.status === "pass"
+                    ? "bg-emerald-900/50 text-emerald-300"
+                    : "bg-red-900/50 text-red-300"
+                }`}>
+                  S_eff = {independence.effective_independent_sources.s_eff}
+                </span>
+                <span className="text-xs text-slate-400">floor = 3</span>
+              </div>
+              <div className="text-right">
+                <span className={`text-xs ${
+                  independence.stale ? "text-amber-400" : "text-slate-400"
+                }`}>
+                  {independence.stale ? "⚠ Review overdue" : "✓ Current"}
+                </span>
+                <p className="text-xs text-slate-500">
+                  Reviewed {independence.reviewed_at} · next {independence.next_review_due}
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-1 sm:grid-cols-3">
+              {independence.sources.map((src) => (
+                <div key={src.source_id} className="rounded-lg bg-slate-800/50 px-3 py-2">
+                  <p className="text-xs font-mono text-slate-300 truncate">{src.source_id}</p>
+                  <p className="text-xs text-slate-500">{src.family}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-slate-500">Source independence ledger unavailable.</p>
+        )}
       </section>
 
       {/* Raw theorem JSON */}

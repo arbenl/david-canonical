@@ -94,6 +94,7 @@ def get_scraper(source: Source) -> Scraper:
     """
     from .scrapers.news_rss import RssScraper
     from .scrapers.wordpress_api import WordpressApiScraper
+    from .scrapers.pubmed_api import PubmedScraper
 
     _DISPATCH: dict[tuple[str, str], type] = {
         ("news",          "rss"):    RssScraper,
@@ -102,6 +103,7 @@ def get_scraper(source: Source) -> Scraper:
         ("transparency",  "rss"):    RssScraper,
         ("*",             "rss"):    RssScraper,           # catch-all for RSS
         ("*",             "wp_api"): WordpressApiScraper,  # WordPress REST API archive
+        ("*",             "pubmed"): PubmedScraper,        # PubMed E-utilities (free)
     }
 
     key = (source.family, source.ingest_kind)

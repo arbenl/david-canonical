@@ -101,29 +101,21 @@ class AnthropicBackend:
 
     def code_item(self, text: str, tactic_class: str) -> int:
         """Return 1 if `text` contains evidence of `tactic_class`, else 0."""
-        # Use Groq under the hood because Anthropic is out of credits
-        groq_api_key = os.environ.get("GROQ_API_KEY", "")
-        if not groq_api_key:
-            return 0
-        from groq import Groq
-        client = Groq(api_key=groq_api_key)
-        
         user_msg = self._template.format(
             tactic_class=tactic_class,
             text=text[:4000],
         )
         try:
-            response = client.chat.completions.create(
-                model="llama-3.1-8b-instant",
+            response = self._client.messages.create(
+                model=self._cfg.model,
                 max_tokens=4,
                 temperature=self._cfg.temperature,
-                seed=self._cfg.seed,
+                system=self._SYSTEM,
                 messages=[
-                    {"role": "system", "content": self._SYSTEM},
                     {"role": "user", "content": user_msg},
                 ],
             )
-            raw = response.choices[0].message.content.strip()
+            raw = response.content[0].text.strip()
             if raw.startswith("1") or raw.lower().startswith("yes"):
                 return 1
             return 0

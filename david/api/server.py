@@ -661,11 +661,163 @@ async def adjudicate_evidence(
             )
         # Mark adjudicated
         mark_adjudicated([evidence_id])
+
+        # Auto-append to gold calibration CSV (event-detected: 1 if any tactic is 1, else 0)
+        gold_label = 1 if any(int(v) == 1 for v in labels.values()) else 0
+        from ..ingest.llm_coder import append_to_gold_calibration_csv
+        append_to_gold_calibration_csv(evidence_id, gold_label)
+
         return {"status": "adjudicated", "evidence_id": evidence_id, "n_labels": len(labels)}
+
     except HTTPException:
         raise
     except Exception as exc:
         return _db_error_503(exc)
+
+
+# ─── route ledger sign-off ───────────────────────────────────────────────────
+
+@api.post("/forecasts/{run_id}/approve")
+async def approve_forecast(
+    run_id: str,
+    authorization: str = Header(default=""),
+) -> dict:
+    """Reviewer sign-off for a forecast run's route ledger.
+
+    Writes a ``reviewer_sign_off.json`` to the forecast directory.
+    Protected by PIPELINE_SECRET.  Per the Automation Contract this sign-off
+    is required before any cell is considered a confirmed headline forecast.
+    """
+    _auth_check(authorization)
+    forecast_dir = FORECASTS_DIR / run_id
+    if not forecast_dir.exists():
+        raise HTTPException(status_code=404, detail=f"forecast run {run_id!r} not found")
+    route_ledger_path = forecast_dir / "route_ledger.json"
+    if not route_ledger_path.exists():
+        raise HTTPException(status_code=409, detail="route_ledger.json not found — run `david route` first")
+
+    from datetime import timezone
+    sign_off = {
+        "run_id": run_id,
+        "approved_at": datetime.now(timezone.utc).isoformat(),
+        "approved_by": "reviewer",
+        "route_ledger_sha256": _sha256_file(route_ledger_path),
+    }
+    (forecast_dir / "reviewer_sign_off.json").write_text(json.dumps(sign_off, indent=2))
+    return {"status": "approved", **sign_off}
+
+
+def _sha256_file(path: Path) -> str:
+    import hashlib
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+
+
+# ─── source independence ledger ──────────────────────────────────────────────
+
+_SOURCE_INDEPENDENCE_PATH = Path(__file__).resolve().parents[2] / "config" / "source_independence.json"
+
+@api.get("/sources/independence")
+def source_independence() -> dict:
+    """Return the source structural-independence ledger with staleness flag.
+
+    Staleness threshold: 120 days (per Automation Contract quarterly review).
+    """
+    if not _SOURCE_INDEPENDENCE_PATH.exists():
+        raise HTTPException(status_code=404, detail="source_independence.json not found")
+    from datetime import date, timedelta
+    ledger = json.loads(_SOURCE_INDEPENDENCE_PATH.read_text())
+    reviewed_at_str = ledger.get("reviewed_at", "")
+    try:
+        reviewed_at = date.fromisoformat(reviewed_at_str)
+        days_since = (date.today() - reviewed_at).days
+        stale = days_since > 120
+    except (ValueError, TypeError):
+        days_since = None
+        stale = True
+    return {
+        **ledger,
+        "days_since_review": days_since,
+        "stale": stale,
+        "staleness_threshold_days": 120,
+    }
+
+
+# ─── automation status ────────────────────────────────────────────────────────
+
+@api.get("/automation/status")
+def automation_status() -> dict:
+    """Return the health of automated pipeline stages.
+
+    Checks:
+    - Last nightly ingest: looks for the most recent log file in data/logs/
+    - Last weekly fit: reads the most recent fit_run from the DB
+    - Staleness thresholds: >24 h for ingest, >7 d for fit
+    """
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+
+    # ── nightly ingest ────────────────────────────────────────────────────────
+    logs_dir = Path(__file__).resolve().parents[2] / "data" / "logs"
+    last_ingest_ts: str | None = None
+    ingest_stale = True
+    if logs_dir.exists():
+        log_files = sorted(logs_dir.glob("nightly_ingest_*.log"))
+        if log_files:
+            mtime = datetime.fromtimestamp(log_files[-1].stat().st_mtime, tz=timezone.utc)
+            last_ingest_ts = mtime.isoformat()
+            ingest_stale = (now - mtime).total_seconds() > 86_400  # 24 h
+
+    # ── weekly fit ────────────────────────────────────────────────────────────
+    last_fit_ts: str | None = None
+    fit_stale = True
+    last_fit_run_id: str | None = None
+    try:
+        from ..db.connection import get_conn
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT run_id, started_at FROM fit_runs "
+                    "WHERE gate_status = 'pass' ORDER BY started_at DESC LIMIT 1"
+                )
+                row = cur.fetchone()
+                if row:
+                    last_fit_run_id, started_at = row
+                    last_fit_ts = started_at.isoformat() if hasattr(started_at, "isoformat") else str(started_at)
+                    # Parse back for delta
+                    from datetime import datetime as _dt
+                    fit_dt = _dt.fromisoformat(last_fit_ts.replace("Z", "+00:00"))
+                    fit_stale = (now - fit_dt).total_seconds() > 7 * 86_400  # 7 d
+    except Exception:
+        pass
+
+    # ── launchd status ────────────────────────────────────────────────────────
+    import subprocess
+    def _launchctl_status(label: str) -> str:
+        try:
+            r = subprocess.run(["launchctl", "list", label], capture_output=True, text=True, timeout=3)
+            if r.returncode == 0:
+                return "loaded"
+            return "not_loaded"
+        except Exception:
+            return "unknown"
+
+    return {
+        "nightly_ingest": {
+            "last_run": last_ingest_ts,
+            "stale": ingest_stale,
+            "threshold_hours": 24,
+            "launchd": _launchctl_status("com.david.nightly-ingest"),
+        },
+        "weekly_fit": {
+            "last_run": last_fit_ts,
+            "last_passing_run_id": last_fit_run_id,
+            "stale": fit_stale,
+            "threshold_days": 7,
+            "launchd": _launchctl_status("com.david.weekly-fit"),
+        },
+        "checked_at": now.isoformat(),
+    }
 
 
 # ─── server entry point ───────────────────────────────────────────────────────

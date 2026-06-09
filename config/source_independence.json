@@ -1,0 +1,75 @@
+{
+  "version": "1.0",
+  "reviewed_at": "2026-06-09",
+  "reviewer": "source_steward",
+  "next_review_due": "2026-09-09",
+  "sources": [
+    {
+      "source_id": "tobacco_tactics_rss",
+      "family": "civil_society",
+      "independence_scores": [
+        {"vs": "balkan_insight_rss",      "score": 0.90, "rationale": "Different editorial lines; civil_society vs investigative news — minimal shared sources"},
+        {"vs": "who_news_rss",            "score": 0.95, "rationale": "WHO is an intergovernmental body; Tobacco Tactics is NGO — fully independent"},
+        {"vs": "plos_medicine_rss",       "score": 0.85, "rationale": "Both civil_society but different jurisdictions and evidence bases"},
+        {"vs": "tobacco_control_bmj",     "score": 0.60, "rationale": "Both civil_society tobacco monitors; partial editorial overlap — borderline, flag for review"},
+        {"vs": "tobacco_tactics_wp",      "score": 0.20, "rationale": "Same organisation, different ingest channel — structurally DEPENDENT, mark as single source"},
+        {"vs": "pubmed_balkans_tobacco",  "score": 0.80, "rationale": "Academic vs advocacy — independent framing and evidence base"}
+      ]
+    },
+    {
+      "source_id": "balkan_insight_rss",
+      "family": "news",
+      "independence_scores": [
+        {"vs": "tobacco_tactics_rss",     "score": 0.90, "rationale": "Investigative news vs civil_society advocacy — independent"},
+        {"vs": "who_news_rss",            "score": 0.92, "rationale": "Regional investigative vs intergovernmental — independent"},
+        {"vs": "health_policy_watch_rss", "score": 0.75, "rationale": "Both news; different publishers — low shared sourcing risk"},
+        {"vs": "politico_eu_rss",         "score": 0.85, "rationale": "Different coverage mandates; Balkan regional vs EU policy"},
+        {"vs": "emerge_europe_rss",       "score": 0.70, "rationale": "Both Balkan/East Europe focus — partial geographic overlap, watch for shared stringers"}
+      ]
+    },
+    {
+      "source_id": "who_news_rss",
+      "family": "transparency",
+      "independence_scores": [
+        {"vs": "tobacco_tactics_rss",     "score": 0.95, "rationale": "Intergovernmental vs NGO — independent"},
+        {"vs": "balkan_insight_rss",      "score": 0.92, "rationale": "Institutional vs investigative journalism — independent"},
+        {"vs": "plos_medicine_rss",       "score": 0.70, "rationale": "Both reference WHO data — some dependence via shared underlying data"},
+        {"vs": "pubmed_balkans_tobacco",  "score": 0.75, "rationale": "WHO guidelines cited in academic literature — moderate dependence via citation"}
+      ]
+    },
+    {
+      "source_id": "tobacco_control_bmj",
+      "family": "civil_society",
+      "independence_scores": [
+        {"vs": "tobacco_tactics_rss",     "score": 0.60, "rationale": "Both tobacco civil_society monitors — partial editorial overlap"},
+        {"vs": "plos_medicine_rss",       "score": 0.65, "rationale": "Both open-access journals reporting on tobacco — moderate overlap"},
+        {"vs": "pubmed_balkans_tobacco",  "score": 0.70, "rationale": "BMJ journal vs PubMed index — different framing, moderate independence"}
+      ]
+    },
+    {
+      "source_id": "pubmed_balkans_tobacco",
+      "family": "academic",
+      "independence_scores": [
+        {"vs": "tobacco_tactics_rss",     "score": 0.80, "rationale": "Peer-reviewed academic vs advocacy — independent methods"},
+        {"vs": "who_news_rss",            "score": 0.75, "rationale": "WHO cited in papers — some shared underlying evidence"},
+        {"vs": "balkan_insight_rss",      "score": 0.88, "rationale": "Academic vs investigative journalism — independent"},
+        {"vs": "tobacco_control_bmj",     "score": 0.70, "rationale": "Both academic tobacco literature — overlap in citation network"}
+      ]
+    },
+    {
+      "source_id": "tobacco_tactics_wp",
+      "family": "civil_society",
+      "independence_scores": [
+        {"vs": "tobacco_tactics_rss",     "score": 0.20, "rationale": "SAME ORGANISATION — structurally dependent; count as one source for Theorem A'"},
+        {"vs": "balkan_insight_rss",      "score": 0.88, "rationale": "Civil_society vs investigative news — independent"},
+        {"vs": "pubmed_balkans_tobacco",  "score": 0.82, "rationale": "Advocacy vs academic — independent"}
+      ]
+    }
+  ],
+  "effective_independent_sources": {
+    "note": "tobacco_tactics_rss and tobacco_tactics_wp are the same organisation; count as 1. S_eff = 5 unique independent families.",
+    "s_eff": 5,
+    "theorem_a_prime_floor": 3,
+    "status": "pass"
+  }
+}

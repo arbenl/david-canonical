@@ -110,11 +110,18 @@ _POLICY_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 
 
 def _tag_country(text: str, coverage: list[str]) -> str:
-    """Return ISO-2 country code from article text, or coverage[0] as fallback."""
+    """Return ISO-2 country code from article text, or coverage[0] as fallback.
+
+    Only tries patterns for countries explicitly listed in coverage (GLOBAL
+    is a scope flag, not a wildcard — it does not enable patterns for countries
+    not in coverage). This prevents articles mentioning incidental country
+    names (e.g. "British American Tobacco") from being routed to strata the
+    source does not monitor.
+    """
+    explicit = {c for c in coverage if c != "GLOBAL"}
     for iso, pattern in _COUNTRY_PATTERNS:
-        if iso in coverage or "GLOBAL" in coverage:
-            if pattern.search(text):
-                return iso
+        if iso in explicit and pattern.search(text):
+            return iso
     # fallback: first explicit non-GLOBAL entry in coverage
     for c in coverage:
         if c != "GLOBAL":
@@ -140,7 +147,20 @@ class RssScraper:
             try:
                 evidence_date = datetime(*entry.published_parsed[:6]).date()
             except Exception:
-                continue
+                # Fallback 1: some feeds (e.g. BMJ Tobacco Control) use
+                # `updated_parsed` instead of `published_parsed`.
+                try:
+                    evidence_date = datetime(*entry.updated_parsed[:6]).date()
+                except Exception:
+                    # Fallback 2: PRISM-standard publication date (ISO-8601 string)
+                    prism_date = getattr(entry, "prism_publicationdate", None)
+                    if prism_date:
+                        try:
+                            evidence_date = date.fromisoformat(prism_date[:10])
+                        except Exception:
+                            continue
+                    else:
+                        continue
             if since is not None and evidence_date < since:
                 continue
             if evidence_date > until:

@@ -639,5 +639,47 @@
     "delta_prior_mean": 0.04,
     "delta_prior_scale": 0.03,
     "enabled": true
+  },
+  {
+    "source_id": "pubmed_balkans_tobacco",
+    "family": "academic",
+    "ingest_kind": "pubmed",
+    "endpoint": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils",
+    "refresh_cadence_days": 30,
+    "country_coverage": [
+      "GLOBAL",
+      "AL",
+      "XK",
+      "MK",
+      "RS",
+      "BA",
+      "ME"
+    ],
+    "policy_coverage": [
+      "taxation",
+      "smoke_free",
+      "marketing",
+      "packaging",
+      "fctc_5_3",
+      "illicit_trade",
+      "novel_products"
+    ],
+    "structural_independence": [
+      {
+        "other_source_id": "tobacco_tactics_wp",
+        "independence_score": 0.95,
+        "rationale": "peer-reviewed academic database vs civil-society tracker; entirely different production pipelines"
+      },
+      {
+        "other_source_id": "tobacco_control_bmj",
+        "independence_score": 0.7,
+        "rationale": "PubMed indexes BMJ Tobacco Control — some overlap in indexed articles"
+      }
+    ],
+    "rho_prior_mean": 0.70,
+    "rho_prior_scale": 0.10,
+    "delta_prior_mean": 0.03,
+    "delta_prior_scale": 0.02,
+    "enabled": true
   }
 ]

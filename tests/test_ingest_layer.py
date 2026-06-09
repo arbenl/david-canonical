@@ -511,3 +511,74 @@ def test_get_evidence_not_found(test_client):
         r = test_client.get("/evidence/doesnotexist")
 
     assert r.status_code == 404
+
+
+def test_append_to_gold_calibration_csv(tmp_path, monkeypatch):
+    """append_to_gold_calibration_csv adds/updates the calibration CSV correctly."""
+    from david.ingest.llm_coder import append_to_gold_calibration_csv
+
+    # Patch GOLD_DIR to a temporary directory
+    monkeypatch.setattr("david.config.GOLD_DIR", tmp_path)
+
+    # 1. Test brand new file creation
+    append_to_gold_calibration_csv("ev123", 1)
+    csv_file = tmp_path / "gold_b_calibration.csv"
+    assert csv_file.exists()
+    content = csv_file.read_text().strip().splitlines()
+    assert content[0] == "evidence_id,gold_label"
+    assert content[1] == "ev123,1"
+
+    # 2. Test appending a new item
+    append_to_gold_calibration_csv("ev456", 0)
+    content = csv_file.read_text().strip().splitlines()
+    assert len(content) == 3
+    assert content[2] == "ev456,0"
+
+    # 3. Test updating an existing item
+    append_to_gold_calibration_csv("ev123", 0)
+    content = csv_file.read_text().strip().splitlines()
+    assert len(content) == 3
+    assert content[1] == "ev123,0"
+
+
+def test_adjudicate_evidence_endpoint(test_client, tmp_path, monkeypatch):
+    """POST /evidence/{id}/adjudicate marks adjudicated and appends to CSV."""
+    # Mock database repository calls
+    mock_upsert = MagicMock()
+    mock_mark = MagicMock()
+    monkeypatch.setattr("david.db.repositories.upsert_coder_label", mock_upsert)
+    monkeypatch.setattr("david.db.repositories.mark_adjudicated", mock_mark)
+
+    # Mock connection and check evidence exists
+    rows = [(1,)]
+    conn, cur = _make_mock_conn(rows)
+
+    @contextmanager
+    def _fake_get_conn():
+        yield conn
+
+    monkeypatch.setattr("david.db.connection.get_conn", _fake_get_conn)
+
+    # Patch GOLD_DIR for the CSV write
+    monkeypatch.setattr("david.config.GOLD_DIR", tmp_path)
+
+    # Call the endpoint
+    r = test_client.post(
+        "/evidence/ev_test_123/adjudicate",
+        json={"labels": {"SIO": 1, "MIO": 0, "CSIO": 0}}
+    )
+
+    assert r.status_code == 200
+    assert r.json()["status"] == "adjudicated"
+
+    # Verify DB operations
+    assert mock_upsert.call_count == 3  # SIO, MIO, CSIO
+    mock_mark.assert_called_once_with(["ev_test_123"])
+
+    # Verify CSV file is created and contains the correct event-detected label (1 because SIO=1)
+    csv_file = tmp_path / "gold_b_calibration.csv"
+    assert csv_file.exists()
+    content = csv_file.read_text().strip().splitlines()
+    assert content[1] == "ev_test_123,1"
+
+

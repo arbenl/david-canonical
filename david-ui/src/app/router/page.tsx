@@ -1,6 +1,7 @@
 import { api } from "@/lib/api";
 import type { ForecastCell } from "@/lib/api";
 import { ForecastRouter, type CurvePoint } from "@/components/forecast-router";
+import { ApproveButton } from "@/components/approve-button";
 
 export const dynamic = "force-dynamic";
 
@@ -96,18 +97,36 @@ export default async function ForecastRouterPage() {
   const usingMock = !latestRun && !cells.length && !sbc;
 
   return (
-    <ForecastRouter
-      realProbability={realProbability}
-      realCurve={realCurve}
-      sbcFail={sbcFail}
-      theoremFail={theoremFail}
-      aPrime={aPrime}
-      bPrime={bPrime}
-      activeStratum={ACTIVE_STRATUM}
-      runId={runId}
-      hStar={hStar}
-      usingMock={usingMock}
-      updatedAgo={agoLabel(usedCells[0]?.emitted_at)}
-    />
+    <div className="space-y-6">
+      <ForecastRouter
+        realProbability={realProbability}
+        realCurve={realCurve}
+        sbcFail={sbcFail}
+        theoremFail={theoremFail}
+        aPrime={aPrime}
+        bPrime={bPrime}
+        activeStratum={ACTIVE_STRATUM}
+        runId={runId}
+        hStar={hStar}
+        usingMock={usingMock}
+        updatedAgo={agoLabel(usedCells[0]?.emitted_at)}
+      />
+
+      {/* Route ledger sign-off — required by Automation Contract before headline promotion */}
+      {runId && (
+        <section className="rounded-xl border border-slate-700/60 bg-slate-800/40 p-5">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-200">Route Ledger Sign-off</h2>
+              <p className="mt-0.5 text-xs text-slate-400">
+                Required by the Automation Contract before cells are confirmed as headline forecasts.{" "}
+                Run: <span className="font-mono text-slate-300">{runId}</span>
+              </p>
+            </div>
+            <ApproveButton runId={runId} />
+          </div>
+        </section>
+      )}
+    </div>
   );
 }
