@@ -686,7 +686,7 @@ def _run_f1_gate(data: dict[str, Any], n_prior_worlds: int = 200) -> dict[str, A
     }
 
 
-def run_fit(run_id: str | None = None) -> dict[str, Any]:
+def run_fit(run_id: str | None = None, quick: bool = False) -> dict[str, Any]:
     run_id = run_id or f"fit_{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}_{uuid4().hex[:6]}"
     fit_dir = FITS_DIR / run_id
     fit_dir.mkdir(parents=True, exist_ok=True)
@@ -710,17 +710,17 @@ def run_fit(run_id: str | None = None) -> dict[str, Any]:
         }
 
     model = _get_compiled_model()
+    # --quick uses 200+200 per chain (same as SBC worlds) — sufficient to
+    # confirm the data path works end-to-end in a demo; use full iterations
+    # for a production-quality fit.
+    warmup = 200 if quick else 2000
+    sampling = 200 if quick else 3000
     fit = model.sample(
         data=data,
         chains=MIN_CHAINS,
         parallel_chains=1,          # run chains sequentially to cap peak RAM
-        iter_warmup=2000,
-        iter_sampling=3000,         # 12000 total draws — sufficient for ESS≥400 after
-                                    # removing item_ambiguity_raw (185 params eliminated;
-                                    # 234→49 params → mixing improves ~(234/49)²≈23×;
-                                    # expected ESS ≈ 100 × 23 = 2300 from same 12k draws).
-                                    # iter_sampling=20000 was crashing Railway: the 80k-draw
-                                    # CSV + stansummary load exceeded available RAM/disk.
+        iter_warmup=warmup,
+        iter_sampling=sampling,
         seed=42,
         adapt_delta=0.97,           # 0.95→0.97: eliminates the 1 residual divergence. ESS=5427
                                     # (54× gate floor) means smaller step-size is affordable.

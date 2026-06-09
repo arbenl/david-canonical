@@ -133,9 +133,10 @@ def calibrate_coders_cmd() -> None:
 @app.command()
 def fit(
     run_id: str = typer.Option(None, help="Run id; default = autogen"),
+    quick: bool = typer.Option(False, "--quick", help="200-warmup+200-sample demo fit (faster, lower quality)"),
 ) -> None:
     """Fit m01_forward.stan on adjudicated + coder-calibrated data."""
-    result = run_fit(run_id=run_id)
+    result = run_fit(run_id=run_id, quick=quick)
     if result["gate_status"] != "pass":
         console.print(f"[red]fit FAIL_CLOSED[/]: {result['reason']}")
         raise typer.Exit(code=2)
