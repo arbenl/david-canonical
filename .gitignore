@@ -13,6 +13,17 @@ __pycache__/
 *.hpp
 *.o
 stan/m01_forward
+stan/coder_calibration
+stan/synthetic_generator
+
+# Local dev logs and runtime artifacts
+.david_logs/
+.david_logs_verify.log
+
+# Session/superpowers dirs (auto-generated)
+.superpowers/
+docs/superpowers/
+david-ui/.claude/
 
 # pytest cache
 .pytest_cache/

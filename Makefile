@@ -17,7 +17,7 @@
 #   make ui-install  Install Next.js dependencies
 # ─────────────────────────────────────────────────────────────────────────────
 
-.PHONY: dev api stop stop-all reset logs status ingest fit sbc falsify test ui-install help
+.PHONY: dev dev-local api stop stop-all reset logs status ingest fit sbc falsify test ui-install help
 
 SHELL := /bin/bash
 
@@ -31,6 +31,12 @@ HORIZONS  ?= 6
 dev:
 	@chmod +x start.sh stop.sh
 	@./start.sh
+
+# Local M4 research loop: dedicated Postgres on :5544 + FastAPI + UI.
+# Pass flags through, e.g.  make dev-local ARGS="--seed"  or  make dev-local ARGS="--no-ui"
+dev-local:
+	@chmod +x scripts/dev-local.sh
+	@./scripts/dev-local.sh $(ARGS)
 
 api:
 	@chmod +x start.sh stop.sh

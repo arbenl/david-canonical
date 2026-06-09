@@ -93,5 +93,5 @@ MODEL_VERSION = "m01_forward_v0.1.0"
 # Database
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
-    "postgresql://david:david@localhost:5432/david",
+    "postgresql://david:david@localhost:5544/david",
 )
