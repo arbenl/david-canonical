@@ -1,32 +1,32 @@
 [
   {
-    "coder_id": "ollama_llama32_3b_seed_001",
+    "coder_id": "ollama_gemma4_e4b_seed_001",
     "provider": "ollama",
-    "model": "llama3.2:3b",
+    "model": "gemma4:e4b",
     "prompt_template_id": "default",
     "seed": 1,
     "temperature": 0.0
   },
   {
-    "coder_id": "ollama_llama32_3b_seed_002",
+    "coder_id": "ollama_gemma4_e4b_seed_002",
     "provider": "ollama",
-    "model": "llama3.2:3b",
+    "model": "gemma4:e4b",
     "prompt_template_id": "default",
     "seed": 2,
     "temperature": 0.0
   },
   {
-    "coder_id": "ollama_llama32_3b_seed_003",
+    "coder_id": "ollama_gemma4_e4b_seed_003",
     "provider": "ollama",
-    "model": "llama3.2:3b",
+    "model": "gemma4:e4b",
     "prompt_template_id": "default",
     "seed": 3,
     "temperature": 0.0
   },
   {
-    "coder_id": "ollama_llama32_3b_seed_004",
+    "coder_id": "ollama_gemma4_e4b_seed_004",
     "provider": "ollama",
-    "model": "llama3.2:3b",
+    "model": "gemma4:e4b",
     "prompt_template_id": "default",
     "seed": 4,
     "temperature": 0.0
