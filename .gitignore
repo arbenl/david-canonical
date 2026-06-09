@@ -27,3 +27,4 @@ stan/m01_forward
 # Local env overrides (DATABASE_URL etc.)
 .env.local
 docker-compose.override.yml
+.vercel
