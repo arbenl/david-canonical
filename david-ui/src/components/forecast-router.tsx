@@ -329,7 +329,7 @@ function buildModels(realCurve: CurvePoint[] | null, realProbability: number | n
   return BASE_MODELS.map((m) => {
     if (m.id === ROUTER_ID) {
       const curve = realCurve && realCurve.length > 1 ? realCurve : m.curve;
-      const probability = realProbability != null ? realProbability * 100 : m.probability;
+      const probability = realProbability == null ? m.probability : realProbability * 100;
       const direction: "up" | "down" = probability >= 50 ? "up" : "down";
       return { ...m, curve, probability, direction };
     }
@@ -351,8 +351,8 @@ function RouterHeader({ updatedAgo, usingMock, explain, onToggle }: Readonly<{
         </h1>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
           <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-700/40 bg-emerald-950/30 px-2.5 py-1 text-emerald-300">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 dot-live text-emerald-400 animate-pulse" />
-            AI Engine Active
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 dot-live text-emerald-400 animate-pulse" />{" "}
+            {"AI Engine Active"}
           </span>
           <span className="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-slate-400">
             Data Updated: {updatedAgo}
