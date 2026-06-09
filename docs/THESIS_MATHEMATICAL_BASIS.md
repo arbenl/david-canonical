@@ -155,14 +155,14 @@ it passes iff $I_{\text{lower 95\%}} \ge$ `INFORMATIVENESS_FLOOR_LOWER_95 = 0.10
 Assembled in [`model/fit.py`](../david/model/fit.py) as `gates["B_prime"]`
 (`lower_95_I_worst_source`). A failing B′ marks the cell `prior_dominated`.
 
-### 2.4 Test-coverage note (honest gap)
+### 2.4 Test-coverage note
 
-The B′ kernels are currently exercised **indirectly** through
+The B′ kernels are exercised both **indirectly** through
 [`tests/test_forecast_engine.py`](../tests/test_forecast_engine.py) (the fit-summary
-B′ fields are read by the forecast emitter). There is **no dedicated unit test**
-asserting $\varepsilon^\star = \tfrac12(1-I)$ or the $N\cdot I^2$ scaling. For the
-thesis's reproducibility claim, adding `tests/test_informativeness.py` with these
-two algebraic identities is recommended.
+B′ fields are read by the forecast emitter) and **directly** through
+[`tests/test_informativeness.py`](../tests/test_informativeness.py), which asserts
+$\varepsilon^\star = \tfrac12(1-I)$ (B′.1, Bayes error) and the $N\cdot I^2$ scaling
+(B′.2), as well as the cell-level gate (16 tests total).
 
 - Front-end: GateCard "Source informativeness" in `engine/page.tsx`; B′ status
   chip in the Router "Active Routing Status" card.

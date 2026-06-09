@@ -18,16 +18,16 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
-from david.config import FITS_DIR, MODEL_VERSION, ID_DISTANCE_FLOOR, FORECAST_HORIZONS_MONTHS
+from david.config import FITS_DIR, MODEL_VERSION, ID_DISTANCE_FLOOR, FORECAST_HORIZONS_MONTHS, INFORMATIVENESS_FLOOR_LOWER_95
 from david.db.repositories import write_fit_run, write_forecast_cells, upsert_stratum
 
 scenario = sys.argv[1] if len(sys.argv) > 1 else "a_fail"
 a_pass = scenario == "certified"
 
 run_id = f"fit_verify_{scenario}"
-ts = datetime.utcnow().isoformat() + "Z"
+ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 # Strata (so /strata returns rows; xk_general is the frontend ACTIVE_STRATUM)
 for sid, country, policy in [
@@ -58,7 +58,7 @@ theorems = {
         "theorem": "B_prime",
         "median_I_worst_source": 0.187,
         "lower_95_I_worst_source": 0.121,
-        "floor": 0.10,
+        "floor": INFORMATIVENESS_FLOOR_LOWER_95,
         "gate_status": "pass",
         "reason": "informativeness_above_floor",
     },

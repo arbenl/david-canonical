@@ -385,11 +385,20 @@ function RouterHeader({ updatedAgo, usingMock, explain, onToggle }: {
   );
 }
 
-function TrustBanner({ certified, sbcFail }: { certified: boolean; sbcFail: boolean }) {
+function TrustBanner({ certified, sbcFail, usingMock }: {
+  certified: boolean; sbcFail: boolean; usingMock: boolean;
+}) {
+  if (usingMock) {
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-amber-700/50 bg-amber-950/30 px-4 py-2.5 text-sm font-medium text-amber-300">
+        🔍 Demo mode — live theorem and calibration checks are not active.
+      </div>
+    );
+  }
   if (certified) {
     return (
       <div className="flex items-center gap-2 rounded-xl border border-emerald-700/50 bg-emerald-950/30 px-4 py-2.5 text-sm font-medium text-emerald-300 glow-emerald">
-        🛡️ Parashikim i Certifikuar Matematikisht (SBC &amp; Theorem A′ Passed)
+        🛡️ Parashikim i Certifikuar Matematikisht (SBC &amp; Teoremat A′ B′ Kaluan)
       </div>
     );
   }
@@ -478,8 +487,18 @@ function CurrentProbabilitiesCard({ model, explain }: { model: ModelData; explai
   );
 }
 
-function ForecastChartCard({ model, explain, theoremFail, sbcFail, hStar }: {
-  model: ModelData; explain: boolean; theoremFail: boolean; sbcFail: boolean; hStar: number | null;
+function theoremLockMsg(aPrime: string, bPrime: string): string {
+  const aFail = aPrime === "fail";
+  const bFail = bPrime === "fail";
+  if (aFail && bFail) return "Teoremat A′ dhe B′ dështuan. Shto burime të pavarura dhe kontrollo informativitetin.";
+  if (aFail) return "Teorema A′ dështoi (Mungesë burimesh të pavarura). Shto më shumë burime RSS për ta zhbllokuar.";
+  if (bFail) return "Teorema B′ dështoi (Informativiteti i pamjaftueshëm i burimeve). Kontrollo cilësinë e burimeve RSS.";
+  return "Teorema dështoi. Kontrollo statusin e portave.";
+}
+
+function ForecastChartCard({ model, explain, theoremFail, sbcFail, aPrime, bPrime, hStar }: {
+  model: ModelData; explain: boolean; theoremFail: boolean; sbcFail: boolean;
+  aPrime: string; bPrime: string; hStar: number | null;
 }) {
   return (
     <div className="card-premium relative p-4 md:col-span-1 xl:col-span-2">
@@ -498,8 +517,7 @@ function ForecastChartCard({ model, explain, theoremFail, sbcFail, hStar }: {
             <div className="max-w-md px-4 text-center">
               <p className="text-2xl">🔒</p>
               <p className="mt-1 text-xs font-semibold leading-relaxed text-red-200">
-                Parashikimi i bllokuar: Teorema A′ dështoi (Mungesë burimesh të pavarura për Kosovën).
-                Shto më shumë burime RSS për ta zhbllokuar.
+                Parashikimi i bllokuar: {theoremLockMsg(aPrime, bPrime)}
               </p>
             </div>
           </div>
@@ -571,7 +589,8 @@ export function ForecastRouter(props: RouterDataProps) {
     [props.realCurve, props.realProbability],
   );
   const model = models.find((m) => m.id === activeId) ?? models[0];
-  const certified = !props.sbcFail && !props.theoremFail;
+  // Certified only when live data confirms explicit passes — skip/unknown gates are not certified.
+  const certified = !props.usingMock && !props.sbcFail && props.aPrime === "pass" && props.bPrime === "pass";
 
   return (
     <div className="relative space-y-6">
@@ -581,7 +600,7 @@ export function ForecastRouter(props: RouterDataProps) {
         explain={explain}
         onToggle={() => setExplain((v) => !v)}
       />
-      <TrustBanner certified={certified} sbcFail={props.sbcFail} />
+      <TrustBanner certified={certified} sbcFail={props.sbcFail} usingMock={props.usingMock} />
 
       <div className="flex flex-col gap-5 lg:flex-row">
         <ModelSelector
@@ -600,6 +619,8 @@ export function ForecastRouter(props: RouterDataProps) {
             explain={explain}
             theoremFail={props.theoremFail}
             sbcFail={props.sbcFail}
+            aPrime={props.aPrime}
+            bPrime={props.bPrime}
             hStar={props.hStar}
           />
           <RegimeCard model={model} explain={explain} />

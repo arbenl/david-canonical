@@ -33,11 +33,13 @@ export function ExplainDot({ title, body, formula, side = "right" }: Props) {
     <button
       type="button"
       aria-label={title}
+      aria-expanded={open}
       className="absolute right-3 top-3 z-30 cursor-help bg-transparent p-0"
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
       onFocus={() => setOpen(true)}
       onBlur={() => setOpen(false)}
+      onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
     >
       <span className="relative flex h-3 w-3">
         <span className="explain-ring absolute inline-flex h-full w-full rounded-full" />

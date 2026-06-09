@@ -87,7 +87,7 @@ export default async function ForecastRouterPage() {
     ? clamp01(usedCells.reduce((s, c) => s + (c.p_active ?? 0), 0) / usedCells.length)
     : null;
 
-  // Fail-closed: only lock on an explicit "fail"; empty/unreachable → demo (unlocked).
+  // Fail-closed: only lock on an explicit "fail"; unknown/skip → demo (not certified, not locked).
   const sbcFail =
     sbc?.measurement?.gate_status === "fail" || sbc?.forecast?.gate_status === "fail";
   const theoremFail = aPrime === "fail" || bPrime === "fail";
