@@ -729,12 +729,11 @@ def run_fit(run_id: str | None = None, quick: bool = False) -> dict[str, Any]:
     )
 
     summary = fit.summary()
-    diagnostics = fit.diagnose()
 
     rhat_max = float(summary["R_hat"].dropna().max())
     bulk_ess_min = float(summary["ESS_bulk"].dropna().min())
     tail_ess_min = float(summary["ESS_tail"].dropna().min())
-    divergences = int(sum(1 for s in diagnostics.split("\n") if "divergent" in s))
+    divergences = int(fit.method_variables()["divergent__"].sum())
 
     mcmc_failed: list[str] = []
     if rhat_max > R_HAT_MAX:
