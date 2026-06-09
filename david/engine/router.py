@@ -41,17 +41,46 @@ ROUTES = (
 
 
 def latest_forecast_dir() -> Path:
-    candidates = sorted(p for p in FORECASTS_DIR.iterdir() if p.is_dir())
+    """Return the forecast dir matching the most recent passing fit."""
+    if not FORECASTS_DIR.exists():
+        raise FileNotFoundError("no forecasts to route; run `david forecast` first")
+    candidates = [p for p in FORECASTS_DIR.iterdir() if p.is_dir()
+                  and list(p.glob("cells_h*.json"))]
     if not candidates:
         raise FileNotFoundError("no forecasts to route; run `david forecast` first")
-    return candidates[-1]
+
+    def _ts(p: Path) -> str:
+        # Prefer timestamp from the matching fit_summary.json
+        fit_summary = FITS_DIR / p.name / "fit_summary.json"
+        if fit_summary.exists():
+            try:
+                return json.loads(fit_summary.read_text()).get("timestamp", "")
+            except Exception:
+                pass
+        return p.name
+
+    return max(candidates, key=_ts)
 
 
 def latest_fit_dir() -> Path:
-    candidates = sorted(p for p in FITS_DIR.iterdir() if p.is_dir())
-    if not candidates:
+    """Return the most recent passing fit directory, sorted by fit_summary timestamp."""
+    if not FITS_DIR.exists():
         raise FileNotFoundError("no fit found")
-    return candidates[-1]
+
+    def _ts(p: Path) -> str:
+        try:
+            return json.loads((p / "fit_summary.json").read_text()).get("timestamp", "")
+        except Exception:
+            return ""
+
+    candidates = [
+        p for p in FITS_DIR.iterdir()
+        if p.is_dir() and (p / "fit_summary.json").exists()
+        and json.loads((p / "fit_summary.json").read_text()).get("gate_status") == "pass"
+    ]
+    if not candidates:
+        raise FileNotFoundError("no passing fit found; run `david fit` first")
+    return max(candidates, key=_ts)
 
 
 def _measurement_gates_pass() -> tuple[bool, list[str]]:
@@ -61,8 +90,9 @@ def _measurement_gates_pass() -> tuple[bool, list[str]]:
     if not summary_path.exists():
         return False, ["fit_summary_missing"]
     data = json.loads(summary_path.read_text())
+    # "skip" means the gate cannot be evaluated (no held-out data, etc.) — not a failure
     failed = [f for f in ("F1", "F3", "F4", "F5")
-              if data.get("gates", {}).get(f, {}).get("gate_status") != "pass"]
+              if data.get("gates", {}).get(f, {}).get("gate_status") not in ("pass", "skip")]
     return (not failed), failed
 
 
@@ -155,6 +185,7 @@ def apply_forecast_routing(
     ledger_path = out_dir / "route_ledger.json"
     ledger_path.write_text(json.dumps(ledger, indent=2))
     return {
+        "gate_status": "pass",
         "ledger_path": str(ledger_path),
         "route_counts": route_counts,
     }

@@ -35,15 +35,24 @@ from ..config import (
 
 
 def latest_fit_dir() -> Path:
-    """Return the most recent directory in FITS_DIR that has a fit_summary.json."""
+    """Return the most recent PASSING fit directory, sorted by fit_summary timestamp."""
     if not FITS_DIR.exists():
         raise FileNotFoundError(f"{FITS_DIR} does not exist; run `david fit` first.")
-    candidates = sorted(
+
+    def _ts(p: Path) -> str:
+        try:
+            return json.loads((p / "fit_summary.json").read_text()).get("timestamp", "")
+        except Exception:
+            return ""
+
+    candidates = [
         p for p in FITS_DIR.iterdir()
         if p.is_dir() and (p / "fit_summary.json").exists()
-    )
+        and json.loads((p / "fit_summary.json").read_text()).get("gate_status") == "pass"
+    ]
     if not candidates:
-        raise FileNotFoundError("No completed fit found; run `david fit` first.")
+        raise FileNotFoundError("No passing fit found; run `david fit` first.")
+    return max(candidates, key=_ts)
     return candidates[-1]
 
 

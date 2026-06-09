@@ -700,7 +700,7 @@ def run_fit(run_id: str | None = None, quick: bool = False) -> dict[str, Any]:
         # of model parameters (not forecast trajectories), so H_forecast=1 is
         # sufficient here.  A separate forecast pass (david forecast) can run
         # with the full horizon once gates pass.
-        data = assemble_fit_data(H_forecast=1)
+        data = assemble_fit_data(H_forecast=max(FORECAST_HORIZONS_MONTHS))
     except FileNotFoundError as e:
         return {
             "gate_status": "fail",
@@ -796,13 +796,9 @@ def run_fit(run_id: str | None = None, quick: bool = False) -> dict[str, Any]:
     except Exception as db_exc:
         print(f"[fit] DB write failed (non-fatal): {db_exc}", flush=True)
 
-    # Parquet write disabled on Railway — draws_pd() allocates a large DataFrame
-    # that OOM-kills the process on shared compute, crashing the pipeline before
-    # any further steps can run.  The DB write above is the durable result.
-    # Re-enable locally when offline analysis of raw draws is needed.
-    # try:
-    #     fit.draws_pd().to_parquet(fit_dir / "draws.parquet")
-    # except Exception as parquet_exc:
-    #     print(f"[fit] draws parquet write failed (non-fatal): {parquet_exc}", flush=True)
+    try:
+        fit.draws_pd().to_parquet(fit_dir / "draws.parquet")
+    except Exception as parquet_exc:
+        print(f"[fit] draws parquet write failed (non-fatal): {parquet_exc}", flush=True)
 
     return {**fit_summary, "fit_dir": str(fit_dir)}
