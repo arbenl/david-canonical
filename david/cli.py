@@ -175,6 +175,9 @@ def forecast(
 ) -> None:
     """Emit forecasts at horizon h. Pre-route; route applied by `david route`."""
     result = emit_forecasts(horizon_months=horizon, cell_filter=cell)
+    if result.get("gate_status") != "pass":
+        console.print(f"[red]forecast FAIL_CLOSED[/]: {result.get('reason')}")
+        raise typer.Exit(code=2)
     console.print(f"[green]forecasts emitted[/]: {result['cells_path']} ({result['n_cells']} cells)")
 
 
@@ -182,8 +185,11 @@ def forecast(
 def route() -> None:
     """Apply FG1..FG6 routing to the latest forecast run."""
     result = apply_forecast_routing()
+    if result.get("gate_status") != "pass":
+        console.print(f"[red]routing FAIL_CLOSED[/]: {result.get('reason')}")
+        raise typer.Exit(code=2)
     console.print(f"[green]routing complete[/]: ledger {result['ledger_path']}")
-    for kind, n in result["route_counts"].items():
+    for kind, n in result.get("route_counts", {}).items():
         console.print(f"  {kind}: {n}")
 
 
