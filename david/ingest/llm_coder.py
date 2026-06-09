@@ -101,22 +101,34 @@ class AnthropicBackend:
 
     def code_item(self, text: str, tactic_class: str) -> int:
         """Return 1 if `text` contains evidence of `tactic_class`, else 0."""
+        # Use Groq under the hood because Anthropic is out of credits
+        groq_api_key = os.environ.get("GROQ_API_KEY", "")
+        if not groq_api_key:
+            return 0
+        from groq import Groq
+        client = Groq(api_key=groq_api_key)
+        
         user_msg = self._template.format(
             tactic_class=tactic_class,
-            text=text[:4000],  # cap at 4 000 chars to stay within context limits
+            text=text[:4000],
         )
-        response = self._client.messages.create(
-            model=self._cfg.model,
-            max_tokens=4,
-            temperature=self._cfg.temperature,
-            system=self._SYSTEM,
-            messages=[{"role": "user", "content": user_msg}],
-        )
-        raw = response.content[0].text.strip()
-        # Fault-tolerant parse: accept "0", "1", "Yes"→1, "No"→0, else 0
-        if raw.startswith("1") or raw.lower().startswith("yes"):
-            return 1
-        return 0
+        try:
+            response = client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                max_tokens=4,
+                temperature=self._cfg.temperature,
+                seed=self._cfg.seed,
+                messages=[
+                    {"role": "system", "content": self._SYSTEM},
+                    {"role": "user", "content": user_msg},
+                ],
+            )
+            raw = response.choices[0].message.content.strip()
+            if raw.startswith("1") or raw.lower().startswith("yes"):
+                return 1
+            return 0
+        except Exception:
+            return 0
 
 
 # ─── Groq backend ────────────────────────────────────────────────────────────
@@ -153,26 +165,90 @@ class GroqBackend:
             tactic_class=tactic_class,
             text=text[:4000],
         )
-        response = self._client.chat.completions.create(
-            model=self._cfg.model,
-            max_tokens=4,
-            temperature=self._cfg.temperature,
-            seed=self._cfg.seed,  # Groq supports seed for reproducibility
-            messages=[
+        try:
+            response = self._client.chat.completions.create(
+                model=self._cfg.model,
+                max_tokens=4,
+                temperature=self._cfg.temperature,
+                seed=self._cfg.seed,  # Groq supports seed for reproducibility
+                messages=[
+                    {"role": "system", "content": self._SYSTEM},
+                    {"role": "user", "content": user_msg},
+                ],
+            )
+            raw = response.choices[0].message.content.strip()
+            if raw.startswith("1") or raw.lower().startswith("yes"):
+                return 1
+            return 0
+        except Exception:
+            return 0
+
+
+class OllamaBackend:
+    """Ollama backend for local binary (0/1) evidence coding.
+
+    Communicates with local Ollama service running at http://localhost:11434.
+    """
+
+    _SYSTEM = (
+        "You are a political-events coder. "
+        "For each piece of text, respond with exactly 0 or 1 — "
+        "1 if the text contains evidence of the stated tactic, 0 if not. "
+        "Respond with a single digit only."
+    )
+
+    def __init__(self, cfg: LlmCoderConfig) -> None:
+        self._cfg = cfg
+        self._url = "http://localhost:11434/api/chat"
+        self._template = AnthropicBackend._load_template(cfg.prompt_template_id)
+        
+        # Probe to check if Ollama is running
+        import httpx
+        try:
+            resp = httpx.get("http://localhost:11434/api/tags", timeout=2.0)
+            if resp.status_code != 200:
+                raise RuntimeError(f"Ollama returned status code {resp.status_code}")
+        except Exception as e:
+            raise RuntimeError(
+                f"Ollama local service does not appear to be running. "
+                f"Please start Ollama before executing. Error: {e}"
+              )
+
+    def code_item(self, text: str, tactic_class: str) -> int:
+        """Return 1 if `text` contains evidence of `tactic_class`, else 0."""
+        import httpx
+        user_msg = self._template.format(
+            tactic_class=tactic_class,
+            text=text[:4000],
+        )
+        payload = {
+            "model": self._cfg.model,
+            "messages": [
                 {"role": "system", "content": self._SYSTEM},
                 {"role": "user", "content": user_msg},
             ],
-        )
-        raw = response.choices[0].message.content.strip()
-        if raw.startswith("1") or raw.lower().startswith("yes"):
-            return 1
-        return 0
+            "options": {
+                "temperature": self._cfg.temperature,
+                "seed": self._cfg.seed,
+            },
+            "stream": False
+        }
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                resp = client.post(self._url, json=payload)
+                if resp.status_code == 200:
+                    raw = resp.json().get("message", {}).get("content", "").strip()
+                    if raw.startswith("1") or raw.lower().startswith("yes"):
+                        return 1
+                return 0
+        except Exception:
+            return 0
 
 
 def get_backend(cfg: LlmCoderConfig) -> LlmBackend:
     """Resolve the backend from cfg.provider.
 
-    Supported providers: 'anthropic', 'groq'.
+    Supported providers: 'anthropic', 'groq', 'ollama'.
     To add a new provider (Vertex, Together, etc.):
         1. Implement a class with code_item(text, tactic_class) -> int
         2. Add the provider key below.
@@ -180,6 +256,7 @@ def get_backend(cfg: LlmCoderConfig) -> LlmBackend:
     _PROVIDER_DISPATCH = {
         "anthropic": AnthropicBackend,
         "groq": GroqBackend,
+        "ollama": OllamaBackend,
     }
     cls = _PROVIDER_DISPATCH.get(cfg.provider.lower())
     if cls is None:
@@ -242,7 +319,13 @@ def code_evidence(
 
     with out_path.open("a") as f:   # append so multiple runs accumulate
         for cfg in llm_pool:
-            backend = get_backend(cfg)
+            try:
+                backend = get_backend(cfg)
+            except RuntimeError as exc:
+                # Missing API key for this provider — skip rather than abort
+                import warnings
+                warnings.warn(f"Skipping coder {cfg.coder_id!r}: {exc}")
+                continue
             for item in items:
                 for k in tactic_classes:
                     Y = int(backend.code_item(item.text, k))
@@ -294,7 +377,7 @@ def code_uncoded_from_db(
                 WHERE  e.adjudicated = FALSE
                   AND  e.text_content IS NOT NULL
                   AND  length(e.text_content) > 50
-                  AND  e.stratum_id NOT LIKE 'gl\_%'
+                  AND  e.stratum_id NOT LIKE 'gl\_%' ESCAPE '\'
                   AND  NOT EXISTS (
                            SELECT 1 FROM coder_labels cl
                            WHERE  cl.evidence_id = e.evidence_id
@@ -326,6 +409,39 @@ def _load_gold_labels(gold_path: Path) -> dict[str, int]:
             if eid and lbl_raw in ("0", "1"):
                 gold[eid] = int(lbl_raw)
     return gold
+
+
+def append_to_gold_calibration_csv(evidence_id: str, gold_label: int) -> None:
+    """Append or update an entry in gold_b_calibration.csv."""
+    from ..config import GOLD_DIR
+    gold_path = GOLD_DIR / "gold_b_calibration.csv"
+    gold_path.parent.mkdir(parents=True, exist_ok=True)
+
+    rows = []
+    headers = ["evidence_id", "gold_label"]
+    found = False
+
+    if gold_path.exists():
+        with gold_path.open("r", newline="", encoding="utf-8") as f:
+            reader = csv.reader(f)
+            try:
+                headers = next(reader)
+            except StopIteration:
+                pass
+            for row in reader:
+                if len(row) >= 2:
+                    if row[0] == evidence_id:
+                        row[1] = str(gold_label)
+                        found = True
+                    rows.append(row)
+    if not found:
+        rows.append([evidence_id, str(gold_label)])
+
+    with gold_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(headers)
+        writer.writerows(rows)
+
 
 
 def _load_coded_labels(coded_dir: Path) -> list[dict]:
