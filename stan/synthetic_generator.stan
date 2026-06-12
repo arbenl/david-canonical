@@ -23,10 +23,7 @@
 // in the same change set — the twin-parity battery fails closed on drift.
 
 functions {
-  // Identical to m01_forward.stan: shifted-Poisson dwell, support d >= 1.
-  int shifted_poisson_rng(real lambda) {
-    return poisson_rng(lambda) + 1;
-  }
+  #include functions/hsmm.stanfunctions
 }
 
 data {
