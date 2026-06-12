@@ -611,11 +611,35 @@ def _run_theorem_gates(fit: Any, data: dict[str, Any]) -> dict[str, Any]:
         # Gate 1: I lower-95 floor
         gate1_pass = I_lower95 >= INFORMATIVENESS_FLOOR_LOWER_95
         # Gate 2: N_eff × I² floor (pre-registered N_EFF_I2_FLOOR = 3.0).
-        # N = data["U"] = total (evidence, tactic) units; i.i.d. clean-channel
-        # bound per Theorem B'.2. Conservative: temporal correction would only
-        # reduce N_eff further for positively-autocorrelated series.
+        # Implement Godambe dependence adjustment:
+        from ..theorems.B_prime import dependence_adjusted_n_eff, compute_activity_autocorrelation
+        
+        # We need Pi_med and dwell_med for autocorrelation
+        Pi_log_med = np.median(log_jump_d, axis=0)
+        L_val = Pi_log_med.shape[0]
+        Pi_med = np.exp(Pi_log_med)
+        idx = np.arange(L_val)
+        Pi_med[idx, idx] = 0.0
+        row_sums = Pi_med.sum(axis=1, keepdims=True)
+        row_sums = np.where(row_sums == 0, 1.0, row_sums)
+        Pi_med = Pi_med / row_sums
+        dwell_med = np.median(dwell_d, axis=0)
+        
+        phi_k_med = np.median(_sigmoid(alpha_act_d).mean(axis=2), axis=0)  # (L,)
+        max_lag = max(1, data.get("T", 1) - 1)
+        
+        corr_A_h = compute_activity_autocorrelation(
+            Pi_med, dwell_med, phi_k_med, max_lag=max_lag, n_mc=max(200, 500 // max(L_val, 1))
+        )
+        
+        phi_med = float(np.median(phi_d))
+        rho_med = float(np.median(rho_d))
+        delta_med = float(np.median(delta_d))
+        p_med = rho_med * phi_med + delta_med * (1.0 - phi_med)
+        
         n_units   = int(data.get("U", 1))
-        n_eff_i2  = float(n_units) * (I_med ** 2)
+        n_adj = dependence_adjusted_n_eff(n_units, I_med, phi_med, p_med, corr_A_h)
+        n_eff_i2  = n_adj * (I_med ** 2)
         gate2_pass = n_eff_i2 >= N_EFF_I2_FLOOR
         if gate1_pass and gate2_pass:
             b_status = "pass"
