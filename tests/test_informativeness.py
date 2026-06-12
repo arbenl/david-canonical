@@ -15,6 +15,7 @@ from david.theorems.B_prime import (
     informativeness_draws,
     bayes_classification_error,
     effective_sample_size,
+    dependence_adjusted_n_eff,
     check_cell,
 )
 from david.config import INFORMATIVENESS_FLOOR_LOWER_95
@@ -79,6 +80,31 @@ def test_effective_sample_size_scales_quadratically():
     assert n_half == pytest.approx(n_full / 4.0)
 
 
+# ── B'.3 Godambe Dependence-Adjusted Sample Size ──────────────────────────────
+
+def test_dependence_adjusted_n_eff_iid_returns_raw_N():
+    # If Corr(A_0, A_h) = 0, sum(gamma_h) = 0, denom = 1 -> N_eff = N
+    corr_zero = np.zeros(5)
+    n_eff = dependence_adjusted_n_eff(100, 0.5, 0.5, 0.5, corr_zero)
+    assert n_eff == 100.0
+
+def test_dependence_adjusted_n_eff_positive_serial_corr_reduces_N():
+    # Positive correlation inflates variance, shrinking effective N
+    corr_pos = np.array([0.5, 0.25, 0.125])
+    # c = 0.5^2 * 0.5 * 0.5 / (0.5 * 0.5) = 0.25
+    # sum_gamma_ratio = 0.25 * 0.875 = 0.21875
+    # denom = 1.0 + 2 * 0.21875 = 1.4375
+    # N_eff = 100 / 1.4375 = 69.565
+    n_eff = dependence_adjusted_n_eff(100, 0.5, 0.5, 0.5, corr_pos)
+    assert n_eff == pytest.approx(100.0 / 1.4375)
+
+def test_dependence_adjusted_n_eff_negative_serial_corr_capped_at_N():
+    # Negative correlation deflates variance, but the rule mandates capping at N
+    corr_neg = np.array([-0.5, -0.25, -0.125])
+    n_eff = dependence_adjusted_n_eff(100, 0.5, 0.5, 0.5, corr_neg)
+    assert n_eff == 100.0
+
+
 # ── cell-level gate on lower-95% credible bound of I(O) ───────────────────────
 
 def test_check_cell_passes_when_lower95_above_floor():
@@ -108,7 +134,7 @@ def test_check_cell_reports_n_eff_from_median():
     delta = np.full(2000, 0.3)   # I = 0.5 deterministically
     res = check_cell("g3", rho, delta, n_replicates=200)
     assert res.posterior_median_I == pytest.approx(0.5)
-    assert res.n_eff_phi_estimate == pytest.approx(200 * 0.5 ** 2)  # = 50
+    assert res.n_eff_adjusted == pytest.approx(200 * 0.5 ** 2)  # = 50
 
 
 def test_check_cell_fails_gate2_when_n_too_small():
