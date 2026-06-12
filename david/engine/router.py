@@ -23,10 +23,14 @@ import numpy as np
 
 from ..config import (
     FORECASTS_DIR, FITS_DIR, POSTERIOR_FDP_DEFAULT_Q,
+    FDP_EXCEEDANCE_GAMMA, FDP_EXCEEDANCE_ALPHA,
     ID_DISTANCE_FLOOR, INFORMATIVENESS_FLOOR_LOWER_95,
     N_EFF_I2_FLOOR, LAMBDA_ENDOG_INTERVAL_MAX_WIDTH,
 )
-from ..theorems.C_renamed import compute_posterior_fdp_threshold
+from ..theorems.C_renamed import (
+    compute_posterior_fdp_threshold,
+    compute_fdp_exceedance_gate,
+)
 
 
 ROUTES = (
@@ -106,6 +110,8 @@ def _forecast_sbc_pass() -> tuple[bool, str]:
 
 def apply_forecast_routing(
     q: float = POSTERIOR_FDP_DEFAULT_Q,
+    gamma: float = FDP_EXCEEDANCE_GAMMA,
+    alpha: float = FDP_EXCEEDANCE_ALPHA,
     horizon_files_glob: str = "cells_h*.json",
     out_dir: Path | None = None,
 ) -> dict[str, Any]:
@@ -165,18 +171,59 @@ def apply_forecast_routing(
             route_counts[route] = route_counts.get(route, 0) + 1
             routed_cells.append(cell)
 
-    # Apply posterior-FDP threshold across "headline" cells only
+    # Apply posterior-FDP threshold across "headline" cells only (expectation gate).
+    # σ(D)-measurability: this path consumes ONLY marginals p_i — never joint draws.
     headline_cells = [c for c in routed_cells if c["forecast_route"] == "headline"]
+    exceedance_summary: dict[str, Any]
     if headline_cells:
         p_hat = np.array([c["p_active"] for c in headline_cells])
         fdp_result = compute_posterior_fdp_threshold(p_hat, q=q)
+        flagged_by_exp = set(fdp_result.flagged_indices)
         for i, c in enumerate(headline_cells):
-            c["headline_flagged_by_posterior_fdp"] = (
-                i in set(fdp_result.flagged_indices)
+            c["headline_flagged_by_posterior_fdp"] = i in flagged_by_exp
+        fdp_summary: dict[str, Any] = fdp_result.__dict__
+
+        # FG6 exceedance gate (C-4) — requires joint posterior draws.
+        # Draws file is optional; gate is skipped when absent (backward-compatible).
+        draws_path = forecast_dir / "headline_draws.npy"
+        if draws_path.exists() and fdp_result.n_flagged > 0:
+            joint_draws = np.load(str(draws_path))
+            n_headline = len(headline_cells)
+            if joint_draws.ndim == 2 and joint_draws.shape[1] == n_headline:
+                # Reorder columns to match the descending-p_i sort order used
+                # by the expectation gate so the exceedance gate sees the same
+                # cell ranking.
+                sort_order = np.argsort(-p_hat)
+                exc_result = compute_fdp_exceedance_gate(
+                    joint_draws[:, sort_order],
+                    m_star=fdp_result.n_flagged,
+                    gamma=gamma,
+                    alpha=alpha,
+                    q=q,
+                )
+                # Cells flagged by the exceedance gate: the top m_accepted cells
+                # in the descending-p_i ordering (= sort_order[:m_accepted]).
+                flagged_by_exc = set(sort_order[: exc_result.m_accepted].tolist())
+                for i, c in enumerate(headline_cells):
+                    c["headline_flagged_by_exceedance_gate"] = i in flagged_by_exc
+                exceedance_summary = exc_result.__dict__
+            else:
+                exceedance_summary = {
+                    "skipped": True,
+                    "reason": "draws_shape_mismatch",
+                    "expected_cols": n_headline,
+                    "got_shape": list(joint_draws.shape),
+                }
+        else:
+            reason = (
+                "no_joint_draws_file"
+                if not draws_path.exists()
+                else "m_star_is_zero"
             )
-        fdp_summary = fdp_result.__dict__
+            exceedance_summary = {"skipped": True, "reason": reason}
     else:
         fdp_summary = {"q_target": q, "n_cells": 0, "n_flagged": 0}
+        exceedance_summary = {"skipped": True, "reason": "no_headline_cells"}
 
     ledger = {
         "route_counts": route_counts,
@@ -184,6 +231,7 @@ def apply_forecast_routing(
         # eligible for the Theorem C posterior expected FDP selection.
         "m_claim_eligible": len(headline_cells),
         "posterior_fdp": fdp_summary,
+        "exceedance_gate": exceedance_summary,
         "n_cells_total": len(routed_cells),
         "cells": routed_cells,
         "timestamp": datetime.utcnow().isoformat() + "Z",

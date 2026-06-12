@@ -24,7 +24,10 @@ import numpy as np
 import pytest
 
 from david.engine.router import apply_forecast_routing
-from david.theorems.C_renamed import compute_posterior_fdp_threshold
+from david.theorems.C_renamed import (
+    compute_posterior_fdp_threshold,
+    compute_fdp_exceedance_gate,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +57,9 @@ def _cell(
 
 
 def _run_router(
-    cells: list[dict], tmp_path: Path
+    cells: list[dict],
+    tmp_path: Path,
+    headline_draws: np.ndarray | None = None,
 ) -> tuple[dict, list[np.ndarray]]:
     """Write cells to a synthetic forecast dir, run the router.
 
@@ -62,10 +67,20 @@ def _run_router(
     The Theorem C kernel is patched with a side-effect that captures every
     p_hat passed to it and delegates to the real implementation so the
     router does not error.
+
+    Parameters
+    ----------
+    headline_draws:
+        Optional (n_draws, n_headline_cells) int array.  When provided it is
+        saved as ``headline_draws.npy`` in the forecast dir, activating the
+        C-4 exceedance gate path in the router.  Columns must be in the same
+        order as the headline cells in ``cells``.
     """
     forecast_dir = tmp_path / "forecast_run"
     forecast_dir.mkdir()
     (forecast_dir / "cells_h3.json").write_text(json.dumps(cells))
+    if headline_draws is not None:
+        np.save(str(forecast_dir / "headline_draws.npy"), headline_draws)
 
     captured: list[np.ndarray] = []
 
@@ -209,3 +224,102 @@ def test_m_claim_eligible_zero_when_all_excluded(tmp_path):
     )
     assert ledger["m_claim_eligible"] == 0
     assert ledger["route_counts"]["headline"] == 0
+
+
+# ---------------------------------------------------------------------------
+# C-4: FG6 exceedance gate wiring in the router
+# ---------------------------------------------------------------------------
+
+def test_exceedance_gate_skipped_when_no_draws_file(tmp_path):
+    """Without headline_draws.npy the exceedance gate records skipped=True.
+
+    Existing C-2 tests have no draws file; this confirms backward-compatibility.
+    """
+    cells = [
+        _cell(p_active=0.95, cell_id="h1"),
+        _cell(p_active=0.90, cell_id="h2"),
+    ]
+    ledger, _ = _run_router(cells, tmp_path)
+
+    exc = ledger["exceedance_gate"]
+    assert exc.get("skipped") is True
+    assert "no_joint_draws_file" in exc.get("reason", "")
+
+
+def test_exceedance_gate_shrinks_flagged_set_in_ledger(tmp_path):
+    """C-4 acceptance criterion: both expectation and exceedance results are
+    recorded in the ledger, and the exceedance gate shrinks the flagged set.
+
+    Scenario (identical to test_exceedance_gate_shrinks_set_correlated_draws):
+    - 5 headline cells with p = [0.95, 0.94, 0.92, 0.91, 0.90].
+    - Expectation rule: m* = 5 (E[FDP] ≈ 0.076 ≤ q=0.10).
+    - Joint draws: 940 good (all TP) + 60 bad (rank-3 and rank-4 FP).
+      Exceedance at m=5 and m=4: 6% > α=5% → FAIL.
+      Exceedance at m=3: 0% → PASS → m_accepted = 3.
+    """
+    cells = [
+        _cell(p_active=0.95, cell_id="h1"),
+        _cell(p_active=0.94, cell_id="h2"),
+        _cell(p_active=0.92, cell_id="h3"),
+        _cell(p_active=0.91, cell_id="h4"),
+        _cell(p_active=0.90, cell_id="h5"),
+    ]
+
+    # Joint draws ordered identically to headline_cells (p already descending,
+    # so sort_order = [0,1,2,3,4] and no reordering happens in the router).
+    n_draws, M = 1000, 5
+    draws = np.ones((n_draws, M), dtype=np.int32)
+    draws[940:, 3] = 0  # rank-3 cell FP in last 60 draws
+    draws[940:, 4] = 0  # rank-4 cell FP in last 60 draws
+
+    ledger, captured = _run_router(cells, tmp_path, headline_draws=draws)
+
+    # --- Expectation gate (posterior_fdp block) ---
+    assert captured, "compute_posterior_fdp_threshold was never called"
+    fdp = ledger["posterior_fdp"]
+    assert fdp["n_flagged"] == 5, (
+        f"Expectation rule should flag 5 cells, got {fdp['n_flagged']}"
+    )
+
+    # --- Exceedance gate (exceedance_gate block) ---
+    assert "exceedance_gate" in ledger, "exceedance_gate block missing from ledger"
+    exc = ledger["exceedance_gate"]
+    assert not exc.get("skipped", False), f"Exceedance gate unexpectedly skipped: {exc}"
+    assert exc["m_star_expectation"] == 5
+    assert exc["m_accepted"] == 3
+    assert not exc["markov_fallback_used"]
+
+    # --- Per-cell flags: both keys recorded on headline cells ---
+    headline_in_ledger = [
+        c for c in ledger["cells"] if c["forecast_route"] == "headline"
+    ]
+    assert len(headline_in_ledger) == 5
+
+    n_flagged_by_exp = sum(
+        1 for c in headline_in_ledger if c.get("headline_flagged_by_posterior_fdp")
+    )
+    n_flagged_by_exc = sum(
+        1 for c in headline_in_ledger if c.get("headline_flagged_by_exceedance_gate")
+    )
+    assert n_flagged_by_exp == 5, (
+        f"Expected 5 cells flagged by expectation rule, got {n_flagged_by_exp}"
+    )
+    assert n_flagged_by_exc == 3, (
+        f"Expected 3 cells flagged by exceedance gate, got {n_flagged_by_exc}"
+    )
+    # The exceedance gate never flags more than the expectation gate
+    assert n_flagged_by_exc <= n_flagged_by_exp
+
+
+def test_exceedance_gate_skipped_when_m_star_is_zero(tmp_path):
+    """When m* = 0 (no cells pass FDP threshold) the exceedance gate is skipped."""
+    # Single cell with very low p_active → E[FDP] = 0.99 >> q → n_flagged = 0
+    cells = [_cell(p_active=0.01, cell_id="h1")]
+    draws = np.ones((100, 1), dtype=np.int32)
+
+    ledger, _ = _run_router(cells, tmp_path, headline_draws=draws)
+
+    exc = ledger["exceedance_gate"]
+    # m_star = 0 because E[FDP] for a single cell with p=0.01 is 0.99 > q
+    assert exc.get("skipped") is True
+    assert exc.get("reason") in ("m_star_is_zero", "no_joint_draws_file")

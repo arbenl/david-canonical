@@ -50,6 +50,8 @@ ID_DISTANCE_FLOOR = 0.05            # Theorem A' practical identifiability
 INFORMATIVENESS_FLOOR_LOWER_95 = 0.10  # Theorem B'.2 lower 95% CI on I(O)
 N_EFF_I2_FLOOR = 3.0                   # Theorem B'.2 N_eff × I² floor (weak-channel guard)
 POSTERIOR_FDP_DEFAULT_Q = 0.10      # Theorem C posterior expected FDP
+FDP_EXCEEDANCE_GAMMA = 0.15         # Theorem C FG6: FDP threshold for exceedance gate
+FDP_EXCEEDANCE_ALPHA = 0.05         # Theorem C FG6: maximum tolerated exceedance fraction
 HORIZON_PRIOR_DRIFT_TAU = 0.50      # Theorem D-forecast horizon-validity threshold
 LAMBDA_ENDOG_INTERVAL_MAX_WIDTH = 0.20  # Gap-5 endogenous-observability sensitivity bound
 
