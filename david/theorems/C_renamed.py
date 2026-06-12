@@ -47,7 +47,12 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..config import POSTERIOR_FDP_DEFAULT_Q, FDP_EXCEEDANCE_GAMMA, FDP_EXCEEDANCE_ALPHA
+from ..config import (
+    POSTERIOR_FDP_DEFAULT_Q,
+    FDP_EXCEEDANCE_GAMMA,
+    FDP_EXCEEDANCE_ALPHA,
+    FDP_MCSE_MARGIN_RATIO,
+)
 
 
 @dataclass(frozen=True)
@@ -78,6 +83,7 @@ class ExceedanceGateResult:
     gamma: float
     alpha: float
     markov_fallback_used: bool
+@dataclass(frozen=True)
 class SensitivityEnvelopeResult:
     q_target: float
     n_cells: int
@@ -87,6 +93,118 @@ class SensitivityEnvelopeResult:
     flagged_indices: list[int]
     # Index into Θ^meas of the most conservative grid point (smallest sum(p_i)).
     worst_theta_index: int
+
+
+@dataclass(frozen=True)
+class McseFloorResult:
+    """Per-cell MCSE/ESS floor check (Theorem C, C-6).
+
+    Fields
+    ------
+    n_cells_checked   : number of cells inspected (= columns of joint_draws).
+    n_cells_excluded  : cells whose MCSE(p_i) ≥ mcse_threshold.
+    excluded_indices  : column indices (original ordering) that failed.
+    bulk_ess          : estimated bulk-ESS per cell (parallel to input columns).
+    mcse              : MCSE(p_i) per cell (std / sqrt(bulk_ESS)).
+    mcse_threshold    : the floor applied: FDP_MCSE_MARGIN_RATIO × q.
+    binding_reason    : typed string for excluded cells ("fdp_mcse_exceeds_gate_margin").
+    """
+    n_cells_checked: int
+    n_cells_excluded: int
+    excluded_indices: list[int]
+    bulk_ess: list[float]
+    mcse: list[float]
+    mcse_threshold: float
+    binding_reason: str = "fdp_mcse_exceeds_gate_margin"
+
+
+def _bulk_ess_1d(chain: np.ndarray) -> float:
+    """Geyer initial positive-sequence bulk-ESS for a 1-D MCMC chain."""
+    n = len(chain)
+    if n < 4:
+        return float(n)
+    v = chain - chain.mean()
+    # Circular autocorrelation via FFT (O(n log n))
+    f = np.fft.rfft(v, n=2 * n)
+    acov = np.fft.irfft(f * f.conj())[:n].real / n
+    if acov[0] == 0.0:
+        return float(n)
+    rho = acov / acov[0]
+    # Sum consecutive pairs (Geyer 1992) until the running sum goes negative.
+    s = 1.0
+    k = 1
+    while k + 1 < n:
+        pair_sum = rho[k] + rho[k + 1]
+        if pair_sum < 0.0:
+            break
+        s += 2.0 * pair_sum
+        k += 2
+    return float(n) / max(s, 1.0)
+
+
+def check_mcse_floor(
+    joint_draws: np.ndarray,
+    q: float = POSTERIOR_FDP_DEFAULT_Q,
+    mcse_margin_ratio: float = FDP_MCSE_MARGIN_RATIO,
+) -> McseFloorResult:
+    """C-6: MCSE/ESS floor check on p_i from joint posterior draws.
+
+    For each cell i, computes MCSE(p_i) = std(A_i^(s)) / sqrt(bulk_ESS_i)
+    and excludes the cell if MCSE(p_i) ≥ mcse_margin_ratio × q.
+
+    σ(D)-MEASURABILITY NOTE — this function uses joint draws ONLY to estimate
+    the Monte Carlo error of p_i, not to compute the FDP gate itself.  The
+    exclusion decision is based on the scalar MCSE statistic per cell; it does
+    not depend on cross-cell joint structure.
+
+    Parameters
+    ----------
+    joint_draws:
+        Shape (n_draws, n_cells).  Column i is the draw sequence A_i^(s).
+    q:
+        Target FDP level (same q used in the expectation gate).
+    mcse_margin_ratio:
+        Pre-registered constant (default FDP_MCSE_MARGIN_RATIO = 0.10).
+        Cells are excluded when MCSE(p_i) ≥ mcse_margin_ratio × q.
+
+    Returns
+    -------
+    McseFloorResult.  ``excluded_indices`` lists the column indices whose
+    MCSE exceeds the threshold; the caller is responsible for removing those
+    cells from the claim-eligible family before calling
+    ``compute_posterior_fdp_threshold``.
+    """
+    if joint_draws.ndim != 2:
+        raise ValueError("joint_draws must be 2-D: (n_draws, n_cells)")
+    n_draws, n_cells = joint_draws.shape
+    if n_draws < 4:
+        raise ValueError("joint_draws must contain at least 4 draws for ESS estimation")
+
+    threshold = mcse_margin_ratio * q
+    draws = joint_draws.astype(float)
+
+    bulk_ess_vals: list[float] = []
+    mcse_vals: list[float] = []
+    excluded: list[int] = []
+
+    for i in range(n_cells):
+        col = draws[:, i]
+        ess = _bulk_ess_1d(col)
+        std_i = float(np.std(col))
+        mcse_i = std_i / max(np.sqrt(ess), 1.0)
+        bulk_ess_vals.append(ess)
+        mcse_vals.append(mcse_i)
+        if mcse_i >= threshold:
+            excluded.append(i)
+
+    return McseFloorResult(
+        n_cells_checked=n_cells,
+        n_cells_excluded=len(excluded),
+        excluded_indices=excluded,
+        bulk_ess=bulk_ess_vals,
+        mcse=mcse_vals,
+        mcse_threshold=threshold,
+    )
 
 
 def compute_posterior_fdp_threshold(

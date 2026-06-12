@@ -250,12 +250,17 @@ def test_exceedance_gate_shrinks_flagged_set_in_ledger(tmp_path):
     """C-4 acceptance criterion: both expectation and exceedance results are
     recorded in the ledger, and the exceedance gate shrinks the flagged set.
 
-    Scenario (identical to test_exceedance_gate_shrinks_set_correlated_draws):
+    Scenario:
     - 5 headline cells with p = [0.95, 0.94, 0.92, 0.91, 0.90].
     - Expectation rule: m* = 5 (E[FDP] ≈ 0.076 ≤ q=0.10).
     - Joint draws: 940 good (all TP) + 60 bad (rank-3 and rank-4 FP).
       Exceedance at m=5 and m=4: 6% > α=5% → FAIL.
       Exceedance at m=3: 0% → PASS → m_accepted = 3.
+
+    Bad draws are SPREAD UNIFORMLY (every 16 rows, not block-structured) so
+    the per-cell chains are approximately iid → bulk-ESS ≈ n_draws → MCSE
+    well below the C-6 threshold (0.01).  This isolates the exceedance gate
+    from the MCSE floor check.
     """
     cells = [
         _cell(p_active=0.95, cell_id="h1"),
@@ -265,12 +270,13 @@ def test_exceedance_gate_shrinks_flagged_set_in_ledger(tmp_path):
         _cell(p_active=0.90, cell_id="h5"),
     ]
 
-    # Joint draws ordered identically to headline_cells (p already descending,
-    # so sort_order = [0,1,2,3,4] and no reordering happens in the router).
+    # Joint draws ordered identically to headline_cells (p already descending).
+    # Spread the 60 "bad" draws uniformly so per-cell ESS stays high (iid-like).
     n_draws, M = 1000, 5
     draws = np.ones((n_draws, M), dtype=np.int32)
-    draws[940:, 3] = 0  # rank-3 cell FP in last 60 draws
-    draws[940:, 4] = 0  # rank-4 cell FP in last 60 draws
+    bad_rows = np.arange(0, 960, 16)  # 60 evenly-spaced rows
+    draws[bad_rows, 3] = 0  # rank-3 cell FP in 60 spread draws
+    draws[bad_rows, 4] = 0  # rank-4 cell FP in 60 spread draws
 
     ledger, captured = _run_router(cells, tmp_path, headline_draws=draws)
 
@@ -323,3 +329,162 @@ def test_exceedance_gate_skipped_when_m_star_is_zero(tmp_path):
     # m_star = 0 because E[FDP] for a single cell with p=0.01 is 0.99 > q
     assert exc.get("skipped") is True
     assert exc.get("reason") in ("m_star_is_zero", "no_joint_draws_file")
+
+
+# ---------------------------------------------------------------------------
+# C-6: MCSE/ESS floor wiring in the router
+# ---------------------------------------------------------------------------
+
+def _make_low_ess_draws(n_draws: int, n_cells: int, bad_cell: int) -> np.ndarray:
+    """Return draws where `bad_cell` is block-autocorrelated (low ESS).
+
+    All other cells are iid Bernoulli(0.9) from a fixed seed so they have
+    high ESS and pass the MCSE floor.  The bad cell alternates 0/1 in 50-draw
+    blocks, giving ESS ≈ n_draws / 50 and MCSE >> 0.01.
+    """
+    rng = np.random.default_rng(99)
+    draws = rng.binomial(1, 0.9, size=(n_draws, n_cells)).astype(np.int32)
+    # Overwrite bad_cell with a block-alternating chain.
+    block = np.repeat(np.tile([1, 0], n_draws // (2 * 50) + 1), 50)[:n_draws]
+    draws[:, bad_cell] = block
+    return draws
+
+
+def test_low_ess_cell_excluded_from_fdp_family(tmp_path):
+    """C-6 acceptance criterion in the router.
+
+    Three headline cells.  Cell 1 gets block-autocorrelated draws → low ESS →
+    MCSE ≥ threshold → demoted to evidence_gap with reason
+    'fdp_mcse_exceeds_gate_margin'.  Cells 0 and 2 are iid → high ESS → stay
+    in the claim-eligible family.
+
+    Uses a real (un-patched) router run so that check_mcse_floor and
+    compute_posterior_fdp_threshold both execute.
+    """
+    cells = [
+        _cell(p_active=0.95, cell_id="c0"),
+        _cell(p_active=0.90, cell_id="c1"),  # will be excluded by MCSE
+        _cell(p_active=0.85, cell_id="c2"),
+    ]
+    draws = _make_low_ess_draws(n_draws=2000, n_cells=3, bad_cell=1)
+
+    forecast_dir = tmp_path / "forecast_run"
+    forecast_dir.mkdir()
+    (forecast_dir / "cells_h3.json").write_text(json.dumps(cells))
+    np.save(str(forecast_dir / "headline_draws.npy"), draws)
+
+    with (
+        patch("david.engine.router.latest_forecast_dir", return_value=forecast_dir),
+        patch("david.engine.router._measurement_gates_pass", return_value=(True, [])),
+        patch("david.engine.router._forecast_sbc_pass", return_value=(True, "")),
+    ):
+        apply_forecast_routing(out_dir=tmp_path)
+
+    ledger = json.loads((tmp_path / "route_ledger.json").read_text())
+
+    # Cell c1 must be demoted to evidence_gap with the typed reason.
+    c1 = next(c for c in ledger["cells"] if c["cell_id"] == "c1")
+    assert c1["forecast_route"] == "evidence_gap", (
+        f"Expected c1 to be demoted to evidence_gap; got {c1['forecast_route']}"
+    )
+    assert "fdp_mcse_exceeds_gate_margin" in c1["route_reasons"], (
+        f"Expected binding reason in route_reasons; got {c1['route_reasons']}"
+    )
+
+    # m_claim_eligible must reflect the exclusion (c0 and c2 only).
+    assert ledger["m_claim_eligible"] == 2, (
+        f"Expected 2 claim-eligible cells after MCSE exclusion; "
+        f"got {ledger['m_claim_eligible']}"
+    )
+
+    # MCSE floor block must be present and record the exclusion.
+    mcse = ledger["mcse_floor"]
+    assert not mcse.get("skipped", False)
+    assert mcse["n_cells_excluded"] >= 1
+    assert mcse["binding_reason"] == "fdp_mcse_exceeds_gate_margin"
+
+
+def test_mcse_floor_skipped_when_no_draws_file(tmp_path):
+    """Without headline_draws.npy the MCSE floor records skipped=True."""
+    cells = [_cell(p_active=0.90, cell_id="h1")]
+    ledger, _ = _run_router(cells, tmp_path)
+    mcse = ledger["mcse_floor"]
+    assert mcse.get("skipped") is True
+    assert "no_joint_draws_file" in mcse.get("reason", "")
+
+
+# ---------------------------------------------------------------------------
+# C-7: Ledger fields completeness
+# ---------------------------------------------------------------------------
+
+def test_ledger_fdp_fields_complete(tmp_path):
+    """C-7: route_ledger.json carries t*(q), m*, exceedance_fraction, and
+    per-cell fdp_binding_reason; no silent headline cells.
+
+    Uses spread bad draws (as in test_exceedance_gate_shrinks_flagged_set_in_ledger)
+    so that all cells pass the MCSE floor and the full FDP block is populated.
+    """
+    cells = [
+        _cell(p_active=0.95, cell_id="h1"),
+        _cell(p_active=0.94, cell_id="h2"),
+        _cell(p_active=0.92, cell_id="h3"),
+        _cell(p_active=0.91, cell_id="h4"),
+        _cell(p_active=0.90, cell_id="h5"),
+    ]
+    n_draws, M = 1000, 5
+    draws = np.ones((n_draws, M), dtype=np.int32)
+    bad_rows = np.arange(0, 960, 16)
+    draws[bad_rows, 3] = 0
+    draws[bad_rows, 4] = 0
+
+    forecast_dir = tmp_path / "forecast_run"
+    forecast_dir.mkdir()
+    (forecast_dir / "cells_h3.json").write_text(json.dumps(cells))
+    np.save(str(forecast_dir / "headline_draws.npy"), draws)
+
+    with (
+        patch("david.engine.router.latest_forecast_dir", return_value=forecast_dir),
+        patch("david.engine.router._measurement_gates_pass", return_value=(True, [])),
+        patch("david.engine.router._forecast_sbc_pass", return_value=(True, "")),
+    ):
+        apply_forecast_routing(out_dir=tmp_path)
+
+    ledger = json.loads((tmp_path / "route_ledger.json").read_text())
+
+    # --- C-7: t*(q) and m* must be present in posterior_fdp block ---
+    fdp = ledger["posterior_fdp"]
+    assert "t_star_q" in fdp, "t*(q) alias missing from posterior_fdp block"
+    assert "m_star" in fdp, "m* alias missing from posterior_fdp block"
+    assert isinstance(fdp["t_star_q"], float)
+    assert isinstance(fdp["m_star"], int)
+
+    # --- C-7: exceedance_fraction must be present in exceedance_gate block ---
+    exc = ledger["exceedance_gate"]
+    assert not exc.get("skipped", False), f"Exceedance gate unexpectedly skipped: {exc}"
+    assert "exceedance_fraction" in exc, (
+        "exceedance_fraction alias missing from exceedance_gate block"
+    )
+
+    # --- C-7: per-cell fdp_binding_reason — no silent headline cells ---
+    headline_cells_in_ledger = [
+        c for c in ledger["cells"] if c.get("forecast_route") == "headline"
+    ]
+    for c in headline_cells_in_ledger:
+        assert "fdp_binding_reason" in c, (
+            f"Cell {c.get('cell_id')} has no fdp_binding_reason (silent cell)"
+        )
+        assert c["fdp_binding_reason"] in (
+            "flagged_fdp_expectation_and_exceedance",
+            "flagged_fdp_expectation_only",
+            "unflagged_below_fdp_threshold",
+            "unflagged_exceedance_shrinkage",
+        ), f"Unrecognised fdp_binding_reason: {c['fdp_binding_reason']}"
+
+    # --- C-7: sensitivity_envelope block present (skipped when no theta grid) ---
+    assert "sensitivity_envelope" in ledger
+    env = ledger["sensitivity_envelope"]
+    assert env.get("skipped") is True  # no theta_grid file → skipped is expected
+    assert "worst_theta_index" in env  # key present even when skipped
+
+    # --- mcse_floor block present ---
+    assert "mcse_floor" in ledger
