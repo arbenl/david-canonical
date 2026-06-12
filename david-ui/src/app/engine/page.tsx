@@ -1,4 +1,4 @@
-import { api } from "@/lib/api";
+import { getFitRuns, getFitSummary, getAutomationStatus, getSourceIndependence } from "@/lib/data";
 import { GateCard } from "@/components/gate-card";
 import { StatCard } from "@/components/stat-card";
 import type { GateStatus } from "@/lib/api";
@@ -10,19 +10,14 @@ function gv(summary: any, path: string[]): any {
 }
 
 export default async function EnginePage() {
-  const [runsRes, automationRes, independenceRes] = await Promise.allSettled([
-    api.fitRuns(1),
-    api.automationStatus(),
-    api.sourceIndependence(),
+  const [runs, automation, independence] = await Promise.all([
+    getFitRuns(1),
+    getAutomationStatus(),
+    getSourceIndependence(),
   ]);
-  const runsData   = runsRes.status   === "fulfilled" ? runsRes.value   : null;
-  const automation = automationRes.status === "fulfilled" ? automationRes.value : null;
-  const independence = independenceRes.status === "fulfilled" ? independenceRes.value : null;
 
-  const latestRun = runsData?.fit_runs?.[0];
-  const summary = latestRun
-    ? await api.fitRun(latestRun.run_id).catch(() => null)
-    : null;
+  const latestRun = runs[0] ?? null;
+  const summary = latestRun ? await getFitSummary(latestRun.run_id) : null;
 
   const theorems = summary?.theorems ?? {};
   const gates    = summary?.gates    ?? {};

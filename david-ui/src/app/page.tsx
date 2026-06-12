@@ -1,4 +1,4 @@
-import { api } from "@/lib/api";
+import { getFitRuns, getStrata, getQueue, getPipelineStatus } from "@/lib/data";
 import { StatCard } from "@/components/stat-card";
 import { PipelineButton } from "@/components/pipeline-button";
 import { FitButton } from "@/components/fit-button";
@@ -19,27 +19,12 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export default async function CommandCenter() {
-  // ── Fetch all data in parallel ──────────────────────────────────────────────
-  const [runsRes, strataRes, queueRes, pipelineRes] = await Promise.allSettled([
-    api.fitRuns(5),
-    api.strata(),
-    api.queue(),
-    // Pipeline live status comes from Railway via the /api/pipeline proxy
-    fetch(
-      `${process.env.DAVID_API_URL ?? "http://localhost:8080"}/internal/pipeline/status`,
-      {
-        headers: process.env.PIPELINE_SECRET
-          ? { Authorization: `Bearer ${process.env.PIPELINE_SECRET}` }
-          : {},
-        cache: "no-store",
-      }
-    ).then((r) => r.json()).catch(() => ({ running: false })),
+  const [runs, strata, queue, pipeline] = await Promise.all([
+    getFitRuns(5),
+    getStrata(),
+    getQueue(),
+    getPipelineStatus(),
   ]);
-
-  const runs     = runsRes.status     === "fulfilled" ? runsRes.value.fit_runs  : [];
-  const strata   = strataRes.status   === "fulfilled" ? strataRes.value.strata  : [];
-  const queue    = queueRes.status    === "fulfilled" ? queueRes.value          : null;
-  const pipeline = pipelineRes.status === "fulfilled" ? pipelineRes.value       : { running: false };
 
   const latestRun        = runs[0];
   const totalEvidence    = strata.reduce((s, x) => s + x.n_evidence,    0);
@@ -47,7 +32,7 @@ export default async function CommandCenter() {
   const strataReadyForFit = strata.filter((s) => s.n_adjudicated >= 3).length;
   const adjPct = totalEvidence > 0
     ? Math.round((totalAdjudicated / totalEvidence) * 100) : 0;
-  const apiOk = runsRes.status === "fulfilled" || strataRes.status === "fulfilled";
+  const apiOk = runs.length > 0 || strata.length > 0;
 
   return (
     <div className="space-y-8 max-w-6xl">

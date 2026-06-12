@@ -1,4 +1,4 @@
-import { api } from "@/lib/api";
+import { getFitRuns, getConfig } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -29,13 +29,8 @@ const layerColor: Record<string, string> = {
 };
 
 export default async function ValidatePage() {
-  const [cfgRes, runsRes] = await Promise.allSettled([
-    api.config(),
-    api.fitRuns(1),
-  ]);
-
-  const cfg     = cfgRes.status   === "fulfilled" ? cfgRes.value     : null;
-  const latestRun = runsRes.status === "fulfilled" ? runsRes.value.fit_runs?.[0] : null;
+  const [cfg, runs] = await Promise.all([getConfig(), getFitRuns(1)]);
+  const latestRun = runs[0] ?? null;
 
   // Try to load falsification ledger from file-based endpoint
   let ledger: Record<string, any> | null = null;

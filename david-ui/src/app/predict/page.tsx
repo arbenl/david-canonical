@@ -1,4 +1,4 @@
-import { api } from "@/lib/api";
+import { getForecastCells } from "@/lib/data";
 import type { ForecastCell } from "@/lib/api";
 import { CiChart, type CiRow } from "@/components/ci-chart";
 
@@ -15,9 +15,9 @@ export default async function PredictPage({ searchParams }: Props) {
   const horizon = parseInt(params.horizon ?? "6", 10);
   const runId   = params.run_id;
 
-  const cellsRes = await api.forecastCells(runId, horizon).catch(() => null);
-  const cells    = cellsRes?.forecast_cells ?? [];
-  const activeRunId = cellsRes?.run_id;
+  const cellsRes = await getForecastCells(runId, horizon);
+  const cells    = cellsRes.forecast_cells ?? [];
+  const activeRunId = cellsRes.run_id || undefined;
 
   // Build chart data
   const chartData: CiRow[] = cells.map((c: ForecastCell) => ({

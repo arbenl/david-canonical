@@ -1,4 +1,11 @@
-/** POST /api/pipeline — trigger ingest + fit on Railway from any client. */
+/**
+ * POST /api/pipeline — trigger ingest + fit on Railway from any client.
+ * GET  /api/pipeline — poll pipeline running status (read-only).
+ *
+ * E-8 audit: POST is a PERMITTED operational trigger. It fires the backend
+ * pipeline job but does NOT mutate routes, FDP thresholds, or gate outcomes.
+ * Those are determined exclusively by the backend engine during fitting.
+ */
 import { NextRequest, NextResponse } from "next/server";
 
 const RAILWAY = process.env.DAVID_API_URL ?? "http://localhost:8080";

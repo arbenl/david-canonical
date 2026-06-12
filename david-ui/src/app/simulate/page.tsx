@@ -1,4 +1,4 @@
-import { api } from "@/lib/api";
+import { getSbc } from "@/lib/data";
 import { GateCard } from "@/components/gate-card";
 import { StatCard } from "@/components/stat-card";
 import type { GateStatus } from "@/lib/api";
@@ -6,7 +6,7 @@ import type { GateStatus } from "@/lib/api";
 export const dynamic = "force-dynamic";
 
 export default async function SimulatePage() {
-  const sbcRes = await api.sbc().catch(() => null);
+  const sbcRes = await getSbc();
   const measurement = sbcRes?.measurement;
   const forecast    = sbcRes?.forecast;
 

@@ -1,3 +1,4 @@
+import { getStrata, getQueue } from "@/lib/data";
 import { api } from "@/lib/api";
 import { StatCard } from "@/components/stat-card";
 import { AdjudicatorQueue } from "@/components/adjudicator-queue";
@@ -5,18 +6,16 @@ import { AdjudicatorQueue } from "@/components/adjudicator-queue";
 export const dynamic = "force-dynamic";
 
 export default async function EvidencePage() {
-  const [strataRes, queueRes, evRes, taxonomyRes] = await Promise.allSettled([
-    api.strata(),
-    api.queue(),
-    api.evidence({ limit: 50 }),
-    api.taxonomy(),
+  const [strata, queue, evRes, taxonomyRes] = await Promise.all([
+    getStrata(),
+    getQueue(),
+    api.evidence({ limit: 50 }).catch(() => ({ evidence: [], n: 0, total: 0 })),
+    api.taxonomy().catch(() => ({ domain: "", tactics: [] })),
   ]);
 
-  const strata = strataRes.status === "fulfilled" ? strataRes.value.strata : [];
-  const queue  = queueRes.status  === "fulfilled" ? queueRes.value         : null;
-  const ev     = evRes.status     === "fulfilled" ? evRes.value.evidence   : [];
-  const total  = evRes.status     === "fulfilled" ? evRes.value.total      : 0;
-  const taxonomy = taxonomyRes.status === "fulfilled" ? taxonomyRes.value : { domain: "", tactics: [] };
+  const ev       = evRes.evidence ?? [];
+  const total    = evRes.total    ?? 0;
+  const taxonomy = taxonomyRes;
 
   const totalEvidence    = strata.reduce((s, x) => s + x.n_evidence,    0);
   const totalAdjudicated = strata.reduce((s, x) => s + x.n_adjudicated, 0);

@@ -38,6 +38,11 @@ export interface FitSummary extends FitRun {
   theorems?: Record<string, Record<string, unknown>>;
   gates?: Record<string, unknown>;
   reason?: string;
+  /** E-9: run-provenance fields (present if backend ≥ M0.1.1). */
+  code_version?: string;
+  data_cutoff?: string;
+  pre_registration_version?: string;
+  theorem_packet_sha?: string;
 }
 
 export interface ForecastCell {

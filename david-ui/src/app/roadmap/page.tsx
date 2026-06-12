@@ -1,4 +1,4 @@
-import { api } from "@/lib/api";
+import { getStrata, getFitRuns, getFitSummary, getSbc } from "@/lib/data";
 import { RoadmapDiagram, type NodeStatus, type RoadmapStatuses } from "@/components/roadmap-diagram";
 
 export const dynamic = "force-dynamic";
@@ -33,31 +33,27 @@ function routerStatusOf(theorem: NodeStatus, sbc: NodeStatus): NodeStatus {
   return "pending";
 }
 
-async function fetchTheoremGates(runId: string): Promise<{ aPrime: unknown; bPrime: unknown }> {
-  const summary = await api.fitRun(runId).catch(() => null);
-  const th = summary?.theorems ?? {};
-  const read = (k: string) => th[k]?.gate_status;
-  return { aPrime: read("A_prime"), bPrime: read("B_prime") };
-}
-
 export default async function RoadmapPage() {
-  const [strataRes, runsRes, sbcRes] = await Promise.allSettled([
-    api.strata(),
-    api.fitRuns(1),
-    api.sbc(),
+  const [strata, runs, sbc] = await Promise.all([
+    getStrata(),
+    getFitRuns(1),
+    getSbc(),
   ]);
 
-  const strata    = strataRes.status === "fulfilled" ? strataRes.value.strata : [];
-  const latestRun = runsRes.status   === "fulfilled" ? runsRes.value.fit_runs?.[0] : null;
-  const sbc       = sbcRes.status    === "fulfilled" ? sbcRes.value : null;
+  const latestRun = runs[0] ?? null;
   const hasRun    = !!latestRun;
 
   const totalEvidence    = strata.reduce((s, x) => s + x.n_evidence, 0);
   const totalAdjudicated = strata.reduce((s, x) => s + x.n_adjudicated, 0);
 
-  const { aPrime, bPrime } = latestRun
-    ? await fetchTheoremGates(latestRun.run_id)
-    : { aPrime: undefined, bPrime: undefined };
+  let aPrime: unknown;
+  let bPrime: unknown;
+  if (latestRun) {
+    const summary = await getFitSummary(latestRun.run_id);
+    const th = summary?.theorems ?? {};
+    aPrime = th["A_prime"]?.gate_status;
+    bPrime = th["B_prime"]?.gate_status;
+  }
 
   const theoremStatus = combine(aPrime, bPrime, hasRun, true);
   const sbcStatus = combine(sbc?.measurement?.gate_status, sbc?.forecast?.gate_status, hasRun, false);
