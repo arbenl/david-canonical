@@ -42,9 +42,13 @@ from ..config import HORIZON_PRIOR_DRIFT_TAU
 class HorizonValidity:
     cell_id: str
     h_star_months: int
+    h_star_q05: int
+    h_star_q95: int
     tau: float
     prior_drift_share_at_h_max: float
     horizon_validity_curve: list[tuple[int, float]]  # (h, prior_drift_share)
+    horizon_validity_curve_q05: list[tuple[int, float]]
+    horizon_validity_curve_q95: list[tuple[int, float]]
 
 
 def stationary_marginal_embedded(Pi_off_diag: np.ndarray) -> np.ndarray:
@@ -133,43 +137,71 @@ def first_crossing_h_star(
 
 def horizon_validity(
     cell_id: str,
-    Pi_off_diag: np.ndarray,
-    dwell_mean: np.ndarray,
+    Pi_off_diag_draws: np.ndarray,
+    dwell_mean_draws: np.ndarray,
     z_t_distribution: np.ndarray,    # posterior of Z_T at present
     h_max: int = 18,
     tau: float = HORIZON_PRIOR_DRIFT_TAU,
     n_mc: int = 1500,
 ) -> HorizonValidity:
     """Horizon diagnostic h* as the first crossing of the drift threshold."""
-    pi_inf = stationary_marginal_time(Pi_off_diag, dwell_mean)
-    R = Pi_off_diag.shape[0]
-    curve: list[tuple[int, float]] = []
-    last_drift = 0.0
-    for h in range(1, h_max + 1):
-        # marginalize over z_t under its posterior distribution
-        forecast = np.zeros(R)
-        for z, p in enumerate(z_t_distribution):
-            if p < 1e-9:
-                continue
-            forecast += p * forecast_regime_distribution(
-                Pi_off_diag, dwell_mean, z_t=z, horizon=h, n_mc=n_mc
-            )
-        forecast = forecast / forecast.sum()
-        # drift share: KL(forecast || pi_inf) decreases as forecast nears
-        # stationary; equivalently, total variation distance to pi_inf
-        tv_to_stationary = 0.5 * np.abs(forecast - pi_inf).sum()
-        tv_to_present = 0.5 * np.abs(forecast - z_t_distribution).sum()
-        # prior_drift_share := 1 - tv_to_stationary / (tv_to_stationary + tv_to_present)
-        # which is the share of forecast "movement" that is toward the stationary marginal
-        denom = tv_to_stationary + tv_to_present + 1e-12
-        drift_share = 1.0 - tv_to_stationary / denom
-        curve.append((h, float(drift_share)))
-        last_drift = float(drift_share)
-    h_star = first_crossing_h_star(curve, tau=tau, h_max=h_max)
+    # Support single point-estimates for testing
+    if Pi_off_diag_draws.ndim == 2:
+        Pi_off_diag_draws = Pi_off_diag_draws[np.newaxis, :, :]
+        dwell_mean_draws = dwell_mean_draws[np.newaxis, :]
+        
+    N_draws, R, _ = Pi_off_diag_draws.shape
+    
+    curves_per_draw = []
+    
+    for i in range(N_draws):
+        Pi_off_diag = Pi_off_diag_draws[i]
+        dwell_mean = dwell_mean_draws[i]
+        pi_inf = stationary_marginal_time(Pi_off_diag, dwell_mean)
+        
+        curve = []
+        for h in range(1, h_max + 1):
+            # marginalize over z_t under its posterior distribution
+            forecast = np.zeros(R)
+            for z, p in enumerate(z_t_distribution):
+                if p < 1e-9:
+                    continue
+                forecast += p * forecast_regime_distribution(
+                    Pi_off_diag, dwell_mean, z_t=z, horizon=h, n_mc=n_mc
+                )
+            forecast = forecast / forecast.sum()
+            # drift share: KL(forecast || pi_inf) decreases as forecast nears
+            # stationary; equivalently, total variation distance to pi_inf
+            tv_to_stationary = 0.5 * np.abs(forecast - pi_inf).sum()
+            tv_to_present = 0.5 * np.abs(forecast - z_t_distribution).sum()
+            denom = tv_to_stationary + tv_to_present + 1e-12
+            drift_share = 1.0 - tv_to_stationary / denom
+            curve.append(float(drift_share))
+        curves_per_draw.append(curve)
+
+    drift_array = np.array(curves_per_draw) # shape (N_draws, h_max)
+    
+    median_drift = np.median(drift_array, axis=0)
+    q05_drift = np.percentile(drift_array, 5, axis=0)
+    q95_drift = np.percentile(drift_array, 95, axis=0)
+    
+    curve_median = [(h+1, float(v)) for h, v in enumerate(median_drift)]
+    curve_q05 = [(h+1, float(v)) for h, v in enumerate(q05_drift)]
+    curve_q95 = [(h+1, float(v)) for h, v in enumerate(q95_drift)]
+    
+    h_star = first_crossing_h_star(curve_median, tau=tau, h_max=h_max)
+    # Higher drift means earlier crossing of tau -> smaller h_star
+    h_star_q05 = first_crossing_h_star(curve_q95, tau=tau, h_max=h_max) 
+    h_star_q95 = first_crossing_h_star(curve_q05, tau=tau, h_max=h_max)
+    
     return HorizonValidity(
         cell_id=cell_id,
         h_star_months=h_star,
+        h_star_q05=h_star_q05,
+        h_star_q95=h_star_q95,
         tau=tau,
-        prior_drift_share_at_h_max=last_drift,
-        horizon_validity_curve=curve,
+        prior_drift_share_at_h_max=float(median_drift[-1]),
+        horizon_validity_curve=curve_median,
+        horizon_validity_curve_q05=curve_q05,
+        horizon_validity_curve_q95=curve_q95,
     )

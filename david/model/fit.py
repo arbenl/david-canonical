@@ -663,41 +663,50 @@ def _run_theorem_gates(fit: Any, data: dict[str, Any]) -> dict[str, Any]:
 
     # ── Theorem D' — forecast horizon validity ────────────────────────────────
     try:
-        # Use posterior median Pi and dwell_lambda (representative point for MC)
-        Pi_log_med = np.median(log_jump_d, axis=0)   # (L, L) log-scale
-        Pi_med     = np.exp(Pi_log_med)
-        np.fill_diagonal(Pi_med, 0.0)
-        row_sums   = Pi_med.sum(axis=1, keepdims=True)
-        row_sums   = np.where(row_sums == 0, 1.0, row_sums)  # guard zero rows
-        Pi_med     = Pi_med / row_sums
-        dwell_med  = np.median(dwell_d, axis=0)       # (L,)
-        pi_inf     = stationary_marginal_time(Pi_med, dwell_med)
-        # D' BUG FIX: passing z_t=pi_inf caused drift_share=0.5 at ALL horizons
-        # (TV_to_stationary ≡ TV_to_present when z_t IS pi_inf → h_star=0 always).
-        # Correct approach: test each regime as the starting state (one-hot), then
-        # take the stationary-weighted average h_star — this represents the expected
-        # forecast horizon across all regime states weighted by their long-run frequency.
-        L_val = Pi_med.shape[0]
+        L_val = log_jump_d.shape[1]
+        
+        # Convert log_jump_d to probabilities for all draws
+        Pi_d = np.exp(log_jump_d)
+        idx = np.arange(L_val)
+        Pi_d[:, idx, idx] = 0.0
+        row_sums = Pi_d.sum(axis=2, keepdims=True)
+        row_sums = np.where(row_sums == 0, 1.0, row_sums)
+        Pi_d = Pi_d / row_sums
+
+        # We also need pi_inf for the weighting. We'll use the median point for the overall weighting.
+        Pi_med = np.median(Pi_d, axis=0)
+        dwell_med = np.median(dwell_d, axis=0)
+        pi_inf = stationary_marginal_time(Pi_med, dwell_med)
+
         h_stars_per_regime: list[int] = []
+        h_stars_q05_per_regime: list[int] = []
+        h_stars_q95_per_regime: list[int] = []
         for _r in range(L_val):
             z_t_onehot = np.zeros(L_val)
             z_t_onehot[_r] = 1.0
             hv_r = horizon_validity(
                 cell_id=f"regime_{_r}",
-                Pi_off_diag=Pi_med,
-                dwell_mean=dwell_med,
+                Pi_off_diag_draws=Pi_d,
+                dwell_mean_draws=dwell_d,
                 z_t_distribution=z_t_onehot,
                 h_max=max(FORECAST_HORIZONS_MONTHS),
                 n_mc=max(200, 500 // max(L_val, 1)),
             )
             h_stars_per_regime.append(hv_r.h_star_months)
+            h_stars_q05_per_regime.append(hv_r.h_star_q05)
+            h_stars_q95_per_regime.append(hv_r.h_star_q95)
         # Stationary-weighted expected h_star
         h_star_overall = int(round(float(np.dot(h_stars_per_regime, pi_inf))))
+        h_star_q05_overall = int(round(float(np.dot(h_stars_q05_per_regime, pi_inf))))
+        h_star_q95_overall = int(round(float(np.dot(h_stars_q95_per_regime, pi_inf))))
+        
         # Also record last D_hv for drift-share diagnostics
         D_hv = hv_r  # final regime's result (for prior_drift_share_at_h_max)
         gates["D_prime"] = {
             "theorem": "D_prime",
             "h_star_months": h_star_overall,
+            "h_star_q05": h_star_q05_overall,
+            "h_star_q95": h_star_q95_overall,
             "h_stars_per_regime": h_stars_per_regime,
             "tau": D_hv.tau,
             "prior_drift_share_at_h_max": D_hv.prior_drift_share_at_h_max,

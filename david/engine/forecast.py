@@ -155,17 +155,17 @@ def emit_forecasts(
             "fit_run_id": run_id,
         }
 
-    # Load theorem D' h_star from fit_summary (pre-computed in run_fit)
     h_star: int = 0
+    h_star_q05: int = 0
+    h_star_q95: int = 0
     fit_summary: dict = {}
     summary_path = fit_dir / "fit_summary.json"
     if summary_path.exists():
         fit_summary = json.loads(summary_path.read_text())
-        h_star = (
-            fit_summary.get("theorems", {})
-                       .get("D_prime", {})
-                       .get("h_star_months", 0)
-        )
+        d_prime = fit_summary.get("theorems", {}).get("D_prime", {})
+        h_star = d_prime.get("h_star_months", 0)
+        h_star_q05 = d_prime.get("h_star_q05", 0)
+        h_star_q95 = d_prime.get("h_star_q95", 0)
 
     below_h_star = horizon_months <= h_star
 
@@ -211,6 +211,8 @@ def emit_forecasts(
             "credible_interval_95": [lo95, hi95],
             "horizon_validity": {
                 "h_star_months": h_star,
+                "h_star_q05": h_star_q05,
+                "h_star_q95": h_star_q95,
                 "below_h_star": below_h_star,
                 "forecast_route": (
                     "conditional_forecast" if below_h_star
