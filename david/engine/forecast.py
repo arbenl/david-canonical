@@ -235,6 +235,10 @@ def emit_forecasts(
                 fit_summary.get("theorems", {}).get("B_prime", {})
                 .get("lower_95_I_worst_source", float("nan"))
             ),
+            "informativeness_n_eff_i2": float(
+                fit_summary.get("theorems", {}).get("B_prime", {})
+                .get("n_eff_i2", float("nan"))
+            ),
             # lambda_endogenous_bounds: wire from observability_sensitivity when
             # the endogenous-observability analysis is run. Default [0, max_width]
             # keeps FG6 open (passes) until real bounds are computed.
