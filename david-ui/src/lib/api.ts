@@ -1,5 +1,7 @@
 /** Typed API client — fetches from FastAPI via Next.js rewrite /api/* */
 
+import type { RouteTag } from "@/lib/route-state";
+
 // Server components: call Railway directly (rewrites are browser-only).
 // Browser / client components: use the /api rewrite to stay same-origin.
 const BASE =
@@ -49,9 +51,18 @@ export interface ForecastCell {
   ci_95_hi: number;
   h_star_months: number;
   below_h_star: boolean;
-  forecast_route: string;
+  /** Narrowed to RouteTag so chart components receive a typed discriminant. */
+  forecast_route: RouteTag;
   stratum_id: string;
   emitted_at: string;
+  /** Route reasons produced by router.py gate stack. */
+  route_reasons?: string[];
+  /** C-7: set on eligible cells after FDP expectation gate. */
+  headline_flagged_by_posterior_fdp?: boolean;
+  /** C-7: set on eligible cells after FG6 exceedance gate. */
+  headline_flagged_by_exceedance_gate?: boolean;
+  /** C-7: typed reason for every headline-eligible cell (no silent cells). */
+  fdp_binding_reason?: string;
 }
 
 export interface EvidenceItem {
@@ -142,6 +153,13 @@ export const api = {
   sourceIndependence:  () => get<SourceIndependence>("/sources/independence"),
   automationStatus:    () => get<AutomationStatus>("/automation/status"),
   taxonomy:            () => get<{ domain: string; tactics: Array<{ id: string; name: string; question: string; hint: string }> }>("/taxonomy"),
+  routeLedger:         (run_id: string) => get<import("@/lib/route-state").FdpLedger & {
+    route_counts: Record<string, number>;
+    m_claim_eligible: number;
+    n_cells_total: number;
+    cells: ForecastCell[];
+    timestamp: string;
+  }>(`/forecasts/${run_id}/route_ledger.json`),
 };
 
 

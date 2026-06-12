@@ -27,10 +27,10 @@ export default async function PredictPage({ searchParams }: Props) {
     ci_80_hi:  c.ci_80_hi  ?? 0,
     ci_95_lo:  c.ci_95_lo  ?? 0,
     ci_95_hi:  c.ci_95_hi  ?? 0,
-    route:     c.forecast_route ?? "conditional_forecast",
+    route:     c.forecast_route ?? "headline",
   }));
 
-  const nConditional = cells.filter((c) => c.forecast_route === "conditional_forecast").length;
+  const nConditional = cells.filter((c) => c.forecast_route === "headline").length;
   const nDominated   = cells.filter((c) => c.forecast_route === "horizon_prior_dominated").length;
 
   return (
@@ -143,11 +143,11 @@ export default async function PredictPage({ searchParams }: Props) {
                       <td className="px-4 py-2.5 font-mono text-xs text-slate-400">{c.h_star_months ?? "—"}</td>
                       <td className="px-4 py-2.5">
                         <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${
-                          c.forecast_route === "conditional_forecast"
-                            ? "bg-sky-950 text-sky-300"
+                          c.forecast_route === "headline"
+                            ? "bg-emerald-950/60 text-emerald-300"
                             : "bg-amber-950/60 text-amber-400"
                         }`}>
-                          {c.forecast_route === "conditional_forecast" ? "conditional" : "prior-dom."}
+                          {c.forecast_route === "headline" ? "headline" : c.forecast_route.replace(/_/g, " ")}
                         </span>
                       </td>
                     </tr>
