@@ -137,7 +137,7 @@ among the most informative channels. The only singular boundary is the
 diagonal rho = delta. See `thesis_mathematical_core.tex`, Theorem A'
 operational diagnostic.
 
-Implementation: `david/engine/identification_distance.py` (must implement the
+Implementation: `david/theorems/A_prime.py` (must implement the
 corrected formula above; note that `tests/test_identification_distance.py`
 historically asserted against the withdrawn label-flip term and requires
 realignment — tracked as an implementation-conformance item)
@@ -568,7 +568,7 @@ Scaffolded in this drop (skeleton present, fill in):
 - `david/engine/orchestrator.py` — pipeline runner
 - `david/engine/forecast.py` — horizon h* enforcement
 - `david/engine/router.py` — FG1..FG6 routing
-- `david/engine/identification_distance.py` — Theorem A' diagnostic
+- `david/theorems/A_prime.py` — Theorem A' diagnostic
 - `david/engine/observability_sensitivity.py` — lambda bounds
 - `david/theorems/{A_prime,B_prime,C_renamed,D_forecast_horizon}.py` — math kernels
 - `david/simulator/{sbc,forecast_sbc,synthetic_world,adversarial_battery}.py`
