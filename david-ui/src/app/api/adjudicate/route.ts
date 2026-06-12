@@ -1,4 +1,11 @@
-/** POST /api/adjudicate — submit human tactic labels for one evidence item. */
+/**
+ * POST /api/adjudicate — submit human tactic labels for one evidence item.
+ *
+ * E-8 audit: This mutation is PERMITTED. It implements the M01 human-review
+ * loop requirement (adjudicator queue). It does NOT mutate routes, FDP
+ * thresholds, or gate outcomes — it only records a human tactic label so
+ * the next `david fit` can incorporate it.
+ */
 import { NextRequest, NextResponse } from "next/server";
 
 const RAILWAY = process.env.DAVID_API_URL ?? "http://localhost:8080";

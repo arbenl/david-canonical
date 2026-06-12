@@ -1,4 +1,4 @@
-import { api } from "@/lib/api";
+import { getSbc, getFitRuns, getFitSummary, getForecastCells } from "@/lib/data";
 import type { ForecastCell } from "@/lib/api";
 import { ForecastRouter, type CurvePoint } from "@/components/forecast-router";
 import { ApproveButton } from "@/components/approve-button";
@@ -49,10 +49,7 @@ function agoLabel(iso?: string): string {
 }
 
 export default async function ForecastRouterPage() {
-  const [sbcRes, runsRes] = await Promise.allSettled([api.sbc(), api.fitRuns(1)]);
-
-  const sbc       = sbcRes.status  === "fulfilled" ? sbcRes.value : null;
-  const latestRun = runsRes.status === "fulfilled" ? runsRes.value.fit_runs?.[0] : null;
+  const [sbc, latestRun] = await Promise.all([getSbc(), (async () => (await getFitRuns(1))[0] ?? null)()]);
 
   // Theorem gate status for the active stratum (from the fit summary).
   let aPrime = "skip", bPrime = "skip";
@@ -64,12 +61,12 @@ export default async function ForecastRouterPage() {
 
   if (latestRun) {
     runId = latestRun.run_id;
-    const [summaryRes, cellsRes] = await Promise.allSettled([
-      api.fitRun(latestRun.run_id),
-      api.forecastCells(latestRun.run_id),
+    const [summary, cellsRes] = await Promise.all([
+      getFitSummary(latestRun.run_id),
+      getForecastCells(latestRun.run_id),
     ]);
-    if (summaryRes.status === "fulfilled") {
-      const th = summaryRes.value.theorems ?? {};
+    if (summary) {
+      const th = summary.theorems ?? {};
       const theorem = (k: string) => (th[k] as Record<string, unknown> | undefined) ?? {};
       const toStr = (v: unknown): string => (typeof v === "string" ? v : "skip");
       aPrime = toStr(theorem("A_prime").gate_status);
@@ -81,9 +78,7 @@ export default async function ForecastRouterPage() {
       if (typeof hq05 === "number") hStarQ05 = hq05;
       if (typeof hq95 === "number") hStarQ95 = hq95;
     }
-    if (cellsRes.status === "fulfilled") {
-      cells = cellsRes.value.forecast_cells ?? [];
-    }
+    cells = cellsRes.forecast_cells ?? [];
   }
 
   // Prefer the active stratum's cells; fall back to all cells.
