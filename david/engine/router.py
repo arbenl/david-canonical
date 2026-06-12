@@ -24,7 +24,7 @@ import numpy as np
 from ..config import (
     FORECASTS_DIR, FITS_DIR, POSTERIOR_FDP_DEFAULT_Q,
     ID_DISTANCE_FLOOR, INFORMATIVENESS_FLOOR_LOWER_95,
-    LAMBDA_ENDOG_INTERVAL_MAX_WIDTH,
+    N_EFF_I2_FLOOR, LAMBDA_ENDOG_INTERVAL_MAX_WIDTH,
 )
 from ..theorems.C_renamed import compute_posterior_fdp_threshold
 
@@ -137,11 +137,13 @@ def apply_forecast_routing(
                 route = "evidence_gap"; reasons.append("FG2_d_theta_below_floor")
 
             # FG3 informativeness
-            if (
-                cell["informativeness_I_O_lower_95"] < INFORMATIVENESS_FLOOR_LOWER_95
-                and route == "headline"
-            ):
-                route = "prior_dominated"; reasons.append("FG3_I_O_lower95_below_floor")
+            if route == "headline":
+                if cell["informativeness_I_O_lower_95"] < INFORMATIVENESS_FLOOR_LOWER_95:
+                    route = "prior_dominated"
+                    reasons.append("FG3_I_O_lower95_below_floor")
+                elif cell.get("informativeness_n_eff_i2", float("inf")) < N_EFF_I2_FLOOR:
+                    route = "prior_dominated"
+                    reasons.append("FG3_N_eff_I2_below_floor")
 
             # FG4 forecast SBC
             if not sbc_ok and route == "headline":
@@ -180,6 +182,7 @@ def apply_forecast_routing(
         "route_counts": route_counts,
         "posterior_fdp": fdp_summary,
         "n_cells_total": len(routed_cells),
+        "cells": routed_cells,
         "timestamp": datetime.utcnow().isoformat() + "Z",
     }
     ledger_path = out_dir / "route_ledger.json"
