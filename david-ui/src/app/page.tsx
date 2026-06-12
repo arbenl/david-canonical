@@ -5,6 +5,8 @@ import { FitButton } from "@/components/fit-button";
 import { NextStepCard } from "@/components/next-step-card";
 import { StrataHealth } from "@/components/strata-health";
 import { PipelineStatusLive } from "@/components/pipeline-status-live";
+import { PremiumForecastChart } from "@/components/premium-forecast-chart";
+import { PremiumRegimeDistribution } from "@/components/premium-regime-distribution";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -214,6 +216,16 @@ export default async function CommandCenter() {
           </div>
         </section>
       )}
+
+      {/* ── Premium Charts (New) ─────────────────────────────────────────── */}
+      <section className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className="lg:col-span-8">
+          <PremiumForecastChart />
+        </div>
+        <div className="lg:col-span-4">
+          <PremiumRegimeDistribution />
+        </div>
+      </section>
 
       {/* ── Fit history table ────────────────────────────────────────────── */}
       {runs.length > 1 && (

@@ -5,16 +5,18 @@ import { AdjudicatorQueue } from "@/components/adjudicator-queue";
 export const dynamic = "force-dynamic";
 
 export default async function EvidencePage() {
-  const [strataRes, queueRes, evRes] = await Promise.allSettled([
+  const [strataRes, queueRes, evRes, taxonomyRes] = await Promise.allSettled([
     api.strata(),
     api.queue(),
     api.evidence({ limit: 50 }),
+    api.taxonomy(),
   ]);
 
   const strata = strataRes.status === "fulfilled" ? strataRes.value.strata : [];
   const queue  = queueRes.status  === "fulfilled" ? queueRes.value         : null;
   const ev     = evRes.status     === "fulfilled" ? evRes.value.evidence   : [];
   const total  = evRes.status     === "fulfilled" ? evRes.value.total      : 0;
+  const taxonomy = taxonomyRes.status === "fulfilled" ? taxonomyRes.value : { domain: "", tactics: [] };
 
   const totalEvidence    = strata.reduce((s, x) => s + x.n_evidence,    0);
   const totalAdjudicated = strata.reduce((s, x) => s + x.n_adjudicated, 0);
@@ -55,6 +57,7 @@ export default async function EvidencePage() {
           <AdjudicatorQueue
             items={queue!.items.slice(0, 20)}
             threshold={queue!.disagreement_threshold ?? 0.3}
+            taxonomy={taxonomy}
           />
           <p className="mt-2 text-[11px] text-slate-600">
             After adjudicating, click{" "}

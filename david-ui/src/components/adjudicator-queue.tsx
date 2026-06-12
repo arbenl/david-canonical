@@ -29,22 +29,17 @@ interface EvidenceResponse {
   n_labels: number;
 }
 
-// ── constants ─────────────────────────────────────────────────────────────────
+export interface TaxonomyTactic {
+  id: string;
+  name: string;
+  question: string;
+  hint: string;
+}
 
-const TACTICS = ["SIO", "MIO", "CSIO"] as const;
-type Tactic = (typeof TACTICS)[number];
-
-const TACTIC_QUESTION: Record<Tactic, string> = {
-  SIO:  "Did state institutions (ministries, regulators, legislators) act in ways that obstruct tobacco control policy?",
-  MIO:  "Did media or information channels promote industry-favourable framing, spread disinformation, or suppress evidence?",
-  CSIO: "Did civil-society bodies (NGOs, academic groups, professional associations) obstruct or water down this tobacco policy?",
-};
-
-const TACTIC_HINT: Record<Tactic, string> = {
-  SIO:  "State Institution Obstruction — look for: delayed regulations, weakened amendments, captured agencies",
-  MIO:  "Media / Information Obstruction — look for: industry-funded studies cited, policy-discrediting narratives",
-  CSIO: "Civil-Society Institution Obstruction — look for: front groups posing as civil society, captured NGOs",
-};
+export interface Taxonomy {
+  domain: string;
+  tactics: TaxonomyTactic[];
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -58,7 +53,7 @@ function coderShortName(id: string): string {
 }
 
 /** Given tactic labels from all coders, compute majority vote (0 or 1). */
-function majorityVote(labels: CoderLabel[], tactic: Tactic): number {
+function majorityVote(labels: CoderLabel[], tactic: string): number {
   const relevant = labels.filter((l) => l.tactic_k === tactic);
   const yes = relevant.filter((l) => l.label === 1).length;
   return yes > relevant.length / 2 ? 1 : 0;
@@ -69,9 +64,11 @@ function majorityVote(labels: CoderLabel[], tactic: Tactic): number {
 interface Props {
   items: QueueItem[];
   threshold: number;
+  taxonomy: Taxonomy;
 }
 
-export function AdjudicatorQueue({ items, threshold }: Props) {
+export function AdjudicatorQueue({ items, threshold, taxonomy }: Props) {
+  const tacticList = taxonomy?.tactics || [];
   const [expanded, setExpanded] = useState<string | null>(null);
   const [detail,   setDetail]   = useState<Record<string, EvidenceResponse>>({});
   const [loading,  setLoading]  = useState<Record<string, boolean>>({});
@@ -96,7 +93,7 @@ export function AdjudicatorQueue({ items, threshold }: Props) {
       setDetail((d) => ({ ...d, [evidenceId]: data }));
       // Pre-fill decisions from majority vote
       const init: Record<string, number> = {};
-      for (const t of TACTICS) init[t] = majorityVote(data.labels, t);
+      for (const t of tacticList) init[t.id] = majorityVote(data.labels, t.id);
       setDecisions((d) => ({ ...d, [evidenceId]: init }));
     } catch (e) {
       setErrors((err) => ({ ...err, [evidenceId]: `Load failed: ${e}` }));
@@ -317,7 +314,8 @@ export function AdjudicatorQueue({ items, threshold }: Props) {
                                 Coder labels · your adjudication
                               </p>
                               <div className="space-y-2">
-                                {TACTICS.map((tactic) => {
+                                {tacticList.map((tacticObj) => {
+                                  const tactic = tacticObj.id;
                                   const tacticLabels = itemDetail.labels.filter(
                                     (l) => l.tactic_k === tactic
                                   );
@@ -347,7 +345,7 @@ export function AdjudicatorQueue({ items, threshold }: Props) {
                                       {/* Tactic name + hint */}
                                       <div>
                                         <p className="text-xs font-bold text-slate-200">
-                                          {tactic}
+                                          {tacticObj.name} ({tactic})
                                           {isWorst && (
                                             <span className="ml-2 text-[10px] text-amber-500">
                                               ⚠ most disagreement
@@ -356,9 +354,9 @@ export function AdjudicatorQueue({ items, threshold }: Props) {
                                         </p>
                                         <p
                                           className="mt-0.5 text-[10px] text-slate-600 leading-snug"
-                                          title={TACTIC_HINT[tactic]}
+                                          title={tacticObj.hint}
                                         >
-                                          {TACTIC_QUESTION[tactic]}
+                                          {tacticObj.question}
                                         </p>
                                       </div>
 

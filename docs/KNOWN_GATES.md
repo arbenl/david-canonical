@@ -15,6 +15,13 @@ drift > 0.02, the gate fails.
 
 ### Why F13 fails in the current regime
 - Theorem D′ sets `h* = 5 months` given the current posterior.
+  (Verified 2026-06-10 under the first-crossing form
+  `h* = min{h ≥ 1 : drift(h) ≥ τ} − 1` — tracker A-4. Recomputation from the
+  recorded posterior draws of the latest passing fit reproduces h* = 5
+  per regime; the drift curve crosses τ = 0.50 between h = 5 and h = 6 and,
+  although non-monotone beyond the crossing, never dips back below τ, so the
+  first-crossing and withdrawn max-form coincide on this posterior. The
+  recorded statistic below is unchanged.)
 - The pipeline emits forecasts at h = 3, 6, 9, 12 months.
 - Cells at h = 6 have `forecast_route = horizon_prior_dominated` because h > h*.
 - F13 computes drift **across all emitted cells including those beyond h***.

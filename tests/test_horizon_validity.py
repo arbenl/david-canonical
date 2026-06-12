@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from david.theorems.D_forecast_horizon import (
+    first_crossing_h_star,
     stationary_marginal_embedded,
     stationary_marginal_time,
     horizon_validity,
@@ -33,6 +34,57 @@ def test_stationary_time_weighted():
     expected_relative = nu * mu
     expected_relative /= expected_relative.sum()
     assert np.allclose(pi_inf, expected_relative)
+
+
+def _withdrawn_max_form(drift_curve, tau, h_max):
+    """The withdrawn max-form h* = max{h : drift(h) < tau} (audit, June 2026).
+
+    Reference implementation kept ONLY as the adversary in the
+    anti-regression test below. Never use this in kernel code.
+    """
+    h_star = 0
+    for h, drift in drift_curve:
+        if drift < tau:
+            h_star = h
+    return h_star
+
+
+def test_first_crossing_stops_at_first_crossing_on_non_monotone_curve():
+    # Drift dips back below tau = 0.5 after the first crossing at h = 4.
+    curve = [(1, 0.10), (2, 0.30), (3, 0.45), (4, 0.55),
+             (5, 0.40), (6, 0.35), (7, 0.60), (8, 0.70)]
+    tau, h_max = 0.5, 8
+    h_first = first_crossing_h_star(curve, tau=tau, h_max=h_max)
+    h_max_form = _withdrawn_max_form(curve, tau=tau, h_max=h_max)
+    # First crossing is at h = 4, so h* = 3.
+    assert h_first == 3
+    # The withdrawn max-form extends past the crossing (to h = 6 here):
+    # the first-crossing form must be strictly smaller on this curve.
+    assert h_max_form == 6
+    assert h_first < h_max_form
+
+
+def test_first_crossing_no_crossing_yields_h_max():
+    curve = [(h, 0.1 + 0.02 * h) for h in range(1, 7)]  # never reaches 0.5
+    assert first_crossing_h_star(curve, tau=0.5, h_max=6) == 6
+
+
+def test_first_crossing_immediate_crossing_yields_zero():
+    curve = [(1, 0.9), (2, 0.95), (3, 0.99)]
+    assert first_crossing_h_star(curve, tau=0.5, h_max=3) == 0
+
+
+def test_horizon_validity_h_star_matches_first_crossing_of_emitted_curve():
+    # End-to-end: the h* reported by horizon_validity must equal the
+    # first-crossing functional applied to its own emitted drift curve.
+    Pi = np.array([[0.0, 0.5, 0.5],
+                   [0.6, 0.0, 0.4],
+                   [0.3, 0.7, 0.0]])
+    mu = np.array([3.0, 3.0, 3.0])
+    z_t = np.array([1.0, 0.0, 0.0])
+    hv = horizon_validity("g_fc", Pi, mu, z_t, h_max=8, tau=0.5, n_mc=300)
+    expected = first_crossing_h_star(hv.horizon_validity_curve, tau=0.5, h_max=8)
+    assert hv.h_star_months == expected
 
 
 def test_horizon_validity_returns_curve():

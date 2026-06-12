@@ -23,7 +23,7 @@ from ..config import (
     ADJUDICATED_DIR, BULK_ESS_MIN, DIVERGENCES_ALLOWED, FITS_DIR,
     FORECAST_HORIZONS_MONTHS, ID_DISTANCE_FLOOR, INFORMATIVENESS_FLOOR_LOWER_95,
     MIN_CHAINS, MIN_POSTERIOR_DRAWS, M01_FORWARD_STAN, MODEL_VERSION,
-    POSTERIOR_FDP_DEFAULT_Q, R_HAT_MAX, TAIL_ESS_MIN,
+    N_EFF_I2_FLOOR, POSTERIOR_FDP_DEFAULT_Q, R_HAT_MAX, TAIL_ESS_MIN,
 )
 
 _COMPILED_MODEL: CmdStanModel | None = None
@@ -608,17 +608,34 @@ def _run_theorem_gates(fit: Any, data: dict[str, Any]) -> dict[str, Any]:
         I_worst    = I_d.mean(axis=1)                     # (D,) — avg across sources
         I_lower95  = float(np.quantile(I_worst, 0.025))
         I_med      = float(np.median(I_worst))
+        # Gate 1: I lower-95 floor
+        gate1_pass = I_lower95 >= INFORMATIVENESS_FLOOR_LOWER_95
+        # Gate 2: N_eff × I² floor (pre-registered N_EFF_I2_FLOOR = 3.0).
+        # N = data["U"] = total (evidence, tactic) units; i.i.d. clean-channel
+        # bound per Theorem B'.2. Conservative: temporal correction would only
+        # reduce N_eff further for positively-autocorrelated series.
+        n_units   = int(data.get("U", 1))
+        n_eff_i2  = float(n_units) * (I_med ** 2)
+        gate2_pass = n_eff_i2 >= N_EFF_I2_FLOOR
+        if gate1_pass and gate2_pass:
+            b_status = "pass"
+            b_reason = "I_lower_95_and_N_eff_I2_above_floor"
+        elif not gate1_pass:
+            b_status = "fail"
+            b_reason = f"I_lower95_{I_lower95:.4f}_below_floor_{INFORMATIVENESS_FLOOR_LOWER_95}"
+        else:
+            b_status = "fail"
+            b_reason = f"N_eff_I2_{n_eff_i2:.2f}_below_floor_{N_EFF_I2_FLOOR}"
         gates["B_prime"] = {
             "theorem": "B_prime",
             "median_I_worst_source": I_med,
             "lower_95_I_worst_source": I_lower95,
             "floor": INFORMATIVENESS_FLOOR_LOWER_95,
-            "gate_status": "pass" if I_lower95 >= INFORMATIVENESS_FLOOR_LOWER_95 else "fail",
-            "reason": (
-                "informativeness_above_floor"
-                if I_lower95 >= INFORMATIVENESS_FLOOR_LOWER_95
-                else f"I_lower95_{I_lower95:.4f}_below_floor_{INFORMATIVENESS_FLOOR_LOWER_95}"
-            ),
+            "n_units": n_units,
+            "n_eff_i2": n_eff_i2,
+            "n_eff_i2_floor": N_EFF_I2_FLOOR,
+            "gate_status": b_status,
+            "reason": b_reason,
         }
     except Exception as exc:
         gates["B_prime"] = {"theorem": "B_prime", "gate_status": "error", "reason": str(exc)}

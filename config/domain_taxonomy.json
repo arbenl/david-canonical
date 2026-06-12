@@ -64,5 +64,85 @@
       "regex": null,
       "aliases": ["general"]
     }
+  ],
+  "tactics": [
+    {
+      "id": "SIO",
+      "name": "State Institution Obstruction",
+      "question": "Did state institutions (ministries, regulators, legislators) act in ways that obstruct tobacco control policy?",
+      "hint": "State Institution Obstruction — look for: delayed regulations, weakened amendments, captured agencies"
+    },
+    {
+      "id": "MIO",
+      "name": "Media / Information Obstruction",
+      "question": "Did media or information channels promote industry-favourable framing, spread disinformation, or suppress evidence?",
+      "hint": "Media / Information Obstruction — look for: industry-funded studies cited, policy-discrediting narratives"
+    },
+    {
+      "id": "CSIO",
+      "name": "Civil-Society Institution Obstruction",
+      "question": "Did civil-society bodies (NGOs, academic groups, professional associations) obstruct or water down this tobacco policy?",
+      "hint": "Civil-Society Institution Obstruction — look for: front groups posing as civil society, captured NGOs"
+    },
+    {
+      "id": "LIO",
+      "name": "Legal / Litigation Obstruction",
+      "question": "Did the industry or its allies use legal threats, lawsuits, or constitutional challenges to obstruct the policy?",
+      "hint": "Legal / Litigation Obstruction — look for: suing the government, threatening trade disputes, intellectual property claims"
+    },
+    {
+      "id": "FIO",
+      "name": "Financial / Economic Obstruction",
+      "question": "Did the industry exaggerate their economic importance or threaten job losses to block the policy?",
+      "hint": "Financial / Economic Obstruction — look for: claims of massive job losses, economic ruin, threats to close factories"
+    },
+    {
+      "id": "PIO",
+      "name": "Political / Legislative Obstruction",
+      "question": "Did the industry maneuver to hijack the political and legislative process directly?",
+      "hint": "Political / Legislative Obstruction — look for: aggressive lobbying, campaign contributions, drafting alternative weak laws"
+    },
+    {
+      "id": "SR",
+      "name": "Smuggling / Illicit Trade Exaggeration",
+      "question": "Did the industry exaggerate the threat of smuggling and illicit trade to oppose tax or packaging policies?",
+      "hint": "Smuggling / Illicit Trade — look for: claims that taxes will increase the black market, funding illicit trade reports"
+    },
+    {
+      "id": "PR",
+      "name": "Public Relations / CSR",
+      "question": "Did the industry use Corporate Social Responsibility (CSR) initiatives to buy goodwill and distract from the policy?",
+      "hint": "Public Relations / CSR — look for: funding youth programs, environmental cleanups, or COVID-19 relief donations"
+    },
+    {
+      "id": "SDO",
+      "name": "Scientific Disinformation",
+      "question": "Did the industry fabricate or fund biased scientific research to discredit proven tobacco control science?",
+      "hint": "Scientific Disinformation — look for: funding dubious scientists, creating fake institutes, undermining peer-reviewed data"
+    },
+    {
+      "id": "TCO",
+      "name": "Tax / Pricing Obstruction",
+      "question": "Did the industry manipulate pricing structures or oppose tax harmonization to keep products affordable?",
+      "hint": "Tax / Pricing Obstruction — look for: absorbing tax hikes, creating cheaper sub-brands, opposing uniform excise taxes"
+    },
+    {
+      "id": "HRO",
+      "name": "Harm Reduction Obstruction",
+      "question": "Did the industry aggressively push novel products (e-cigarettes, HTPs) under the guise of harm reduction to bypass bans?",
+      "hint": "Harm Reduction Obstruction — look for: claiming e-cigarettes are safe, opposing novel product bans, marketing to youth"
+    },
+    {
+      "id": "IGO",
+      "name": "Inter-Governmental Organization Obstruction",
+      "question": "Did the industry use international trade agreements (WTO, bilateral treaties) to intimidate the government?",
+      "hint": "Inter-Governmental Organization Obstruction — look for: invoking WTO rules, claiming violation of free trade agreements"
+    },
+    {
+      "id": "FGI",
+      "name": "Front Group Involvement",
+      "question": "Did the industry fund astroturf organizations (fake grassroots) or front groups to simulate public opposition?",
+      "hint": "Front Group Involvement — look for: smokers' rights groups, retailer associations, or think tanks funded by big tobacco"
+    }
   ]
 }

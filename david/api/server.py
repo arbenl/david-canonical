@@ -348,7 +348,7 @@ def list_forecast_cells(
         if run_id is None:
             # Resolve latest run_id from fit_runs table
             from ..db.repositories import get_fit_runs
-            runs = get_fit_runs(limit=1)
+            runs = get_fit_runs(limit=1, require_pass=True)
             if not runs:
                 return {"forecast_cells": [], "n": 0,
                         "detail": "No fit runs in database. Run `david fit` first."}
@@ -742,7 +742,17 @@ def source_independence() -> dict:
     }
 
 
-# ─── automation status ────────────────────────────────────────────────────────
+@api.get("/taxonomy")
+async def get_taxonomy():
+    """Return the active domain taxonomy configuration."""
+    from ..config import DOMAIN_TAXONOMY_REGISTRY
+    import json
+    if not DOMAIN_TAXONOMY_REGISTRY.exists():
+        return {}
+    with open(DOMAIN_TAXONOMY_REGISTRY) as f:
+        return json.load(f)
+
+# ─── evidence pipeline status ────────────────────────────────────────────────────────
 
 @api.get("/automation/status")
 def automation_status() -> dict:

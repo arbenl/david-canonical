@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 
 # Roots
@@ -47,6 +48,7 @@ PRE_REGISTRATION = CONFIG_ROOT / "m01_preregistration_v3.json"
 # Theorem floors (pre-registered; reviewed quarterly)
 ID_DISTANCE_FLOOR = 0.05            # Theorem A' practical identifiability
 INFORMATIVENESS_FLOOR_LOWER_95 = 0.10  # Theorem B'.2 lower 95% CI on I(O)
+N_EFF_I2_FLOOR = 3.0                   # Theorem B'.2 N_eff × I² floor (weak-channel guard)
 POSTERIOR_FDP_DEFAULT_Q = 0.10      # Theorem C posterior expected FDP
 HORIZON_PRIOR_DRIFT_TAU = 0.50      # Theorem D-forecast horizon-validity threshold
 LAMBDA_ENDOG_INTERVAL_MAX_WIDTH = 0.20  # Gap-5 endogenous-observability sensitivity bound
@@ -76,11 +78,20 @@ GOLD_STANDARD_SAMPLE_RATE = 0.05
 
 # Pre-registered tactic classes (must match K in m01_forward.stan).
 # Bump MODEL_VERSION if you add or remove tactics.
-TACTIC_CLASSES: tuple[str, ...] = (
-    "SIO",   # State institution obstruction
-    "MIO",   # Media/information obstruction
-    "CSIO",  # Civil-society institution obstruction
-)
+def _load_tactic_classes() -> tuple[str, ...]:
+    if not DOMAIN_TAXONOMY_REGISTRY.exists():
+        return ("SIO", "MIO", "CSIO")
+    try:
+        with open(DOMAIN_TAXONOMY_REGISTRY) as f:
+            data = json.load(f)
+        tactics = data.get("tactics", [])
+        if not tactics:
+            return ("SIO", "MIO", "CSIO")
+        return tuple(t["id"] for t in tactics)
+    except Exception:
+        return ("SIO", "MIO", "CSIO")
+
+TACTIC_CLASSES: tuple[str, ...] = _load_tactic_classes()
 
 # LLM pool config file (list of LlmCoderConfig dicts)
 LLM_POOL_REGISTRY = CONFIG_ROOT / "llm_pool.json"
@@ -89,7 +100,7 @@ LLM_POOL_REGISTRY = CONFIG_ROOT / "llm_pool.json"
 FORECAST_HORIZONS_MONTHS = (3, 6, 9, 12)
 
 # Model version (bump on Stan or theorem change)
-MODEL_VERSION = "m01_forward_v0.1.0"
+MODEL_VERSION = "m01_forward_v0.1.1"
 
 # Database
 DATABASE_URL = os.environ.get(

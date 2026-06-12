@@ -9,13 +9,20 @@ Statement (informal):
     prior_drift_h(g) = expected KL divergence of cond. forecast at h from
                        its stationary marginal pi_inf
 
-  The horizon-validity bound h*(g) is the largest h such that
+  The horizon diagnostic h*(g) is the first crossing of the drift threshold:
 
-    prior_drift_h(g) / (prior_drift_h(g) + signal_h(g)) < tau
+    h* = min{ h >= 1 : drift(h) >= tau } - 1,
+
+  with h* = h_max if no crossing occurs. drift(h) is not proven monotone
+  in h, so the withdrawn max-form (largest h with drift < tau) could admit
+  horizons beyond a first crossing whenever the drift dips back below tau;
+  the first-crossing form is the conservative, operative reading
+  (thesis_mathematical_core.tex, Theorem D-forecast, FG5).
 
   At h > h*(g), the conditional forecast collapses toward the stationary
   marginal; routing degrades to `horizon_prior_dominated` and returns the
-  marginal regime prediction instead.
+  marginal regime prediction instead. h* is an estimated diagnostic with
+  posterior and Monte-Carlo uncertainty, not an exact validity boundary.
 
 This is the formal counterpart of "forecasts at long horizons are
 prior-dominated regardless of model fidelity." Implemented as a Monte-Carlo
@@ -105,6 +112,25 @@ def forecast_regime_distribution(
     return counts / counts.sum()
 
 
+def first_crossing_h_star(
+    drift_curve: list[tuple[int, float]],
+    tau: float,
+    h_max: int,
+) -> int:
+    """First-crossing horizon diagnostic from a drift curve.
+
+    h* = min{ h >= 1 : drift(h) >= tau } - 1, with h* = h_max if no
+    crossing occurs. drift(h) is not proven monotone, so the crossing
+    scan must stop at the FIRST h with drift(h) >= tau: later dips back
+    below tau never re-extend h* (the max-form that allowed this is
+    withdrawn per the June 2026 audit).
+    """
+    for h, drift in drift_curve:
+        if drift >= tau:
+            return h - 1
+    return h_max
+
+
 def horizon_validity(
     cell_id: str,
     Pi_off_diag: np.ndarray,
@@ -114,11 +140,10 @@ def horizon_validity(
     tau: float = HORIZON_PRIOR_DRIFT_TAU,
     n_mc: int = 1500,
 ) -> HorizonValidity:
-    """Find the largest h such that drift share is below tau."""
+    """Horizon diagnostic h* as the first crossing of the drift threshold."""
     pi_inf = stationary_marginal_time(Pi_off_diag, dwell_mean)
     R = Pi_off_diag.shape[0]
     curve: list[tuple[int, float]] = []
-    h_star = 0
     last_drift = 0.0
     for h in range(1, h_max + 1):
         # marginalize over z_t under its posterior distribution
@@ -140,8 +165,7 @@ def horizon_validity(
         drift_share = 1.0 - tv_to_stationary / denom
         curve.append((h, float(drift_share)))
         last_drift = float(drift_share)
-        if drift_share < tau:
-            h_star = h
+    h_star = first_crossing_h_star(curve, tau=tau, h_max=h_max)
     return HorizonValidity(
         cell_id=cell_id,
         h_star_months=h_star,

@@ -1,0 +1,222 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usetikzlibrary{arrows,positioning,shapes.geometric,calc}
+
+\geometry{margin=1in}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue,
+    pdftitle={The Coupled Gated Tensor-Hidden Semi-Markov Model (CGT-HSMM)},
+    pdfauthor={Arben Lila}
+}
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{definition}{Definition}
+\newtheorem{claim}[theorem]{Claim}
+\newtheorem{critique}{Critique}
+\newtheorem{defense}{Defense}
+\newtheorem{remark}{Remark}
+
+\title{\textbf{The Coupled Gated Tensor-Hidden Semi-Markov Model (CGT-HSMM)}\\
+\large A Unified Bayesian Predictor for Latent Regime Dynamics under Noisy State-Dependent Multi-Source Annotations}
+\author{\textbf{Arben Lila} \\ \textit{Internal Thesis Work}}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This paper introduces the Coupled Gated Tensor-Hidden Semi-Markov Model (CGT-HSMM), a unified Bayesian framework that integrates multi-source annotator calibration with temporal sequence estimation. Traditional crowdsourcing models (e.g., Dawid-Skene, HMM-Crowd) assume either independent observations or static annotator accuracy. In contrast, the CGT-HSMM models the latent states as a discrete-time (monthly) Hidden Semi-Markov process while conditioning the annotator emission distributions on the active latent state using a state-dependent 3-way tensor CP decomposition. We prove oracle-regime emission identifiability under Kruskal rank constraints, delineate precisely which components of full-model identifiability are established in the literature (the geometric-dwell special case) and which remain conjectural for general dwell laws, and derive a score-autocovariance effective-sample-size correction for the marginal-score (Godambe) estimator, used as a conservative operational gate. Furthermore, we audit the framework adversarially, presenting critical challenges and defenses, and we state acknowledged limitations explicitly. % %%NEEDS_HUMAN_MATH_REVIEW%%
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Introduction}
+Modern decision-support systems in public policy, epidemiology, and geopolitical risk tracking rely on noisy, heterogeneous data channels. To aggregate these channels, statisticians employ latent class models (like the Dawid-Skene model) to calibrate source reliability. Separately, to capture the temporal progression of regimes, researchers employ sequence models (such as Hidden Markov Models).
+
+However, in real-world scenarios, these two processes are coupled:
+\begin{enumerate}
+    \item \textbf{State-Dependent Reliability:} A source's reliability (sensitivity and false-positive rate) is rarely static; it shifts depending on the underlying latent state. For instance, media feeds, institutional report streams, scraper pipelines, or separately modeled annotation channels often experience elevated false-positive rates during volatile policy regimes. Coders reading the same document are annotation channels, not independent acquisition sources; they enter the likelihood through a separate Dawid--Skene coder-reliability layer.
+    \item \textbf{Uncertainty Propagation:} Decoupled pipelines estimate source parameters first and plug them into sequence estimators as constants. This underestimates the posterior variance, leading to overconfident forecasts.
+\end{enumerate}
+
+To address these limitations, we present the \textbf{Coupled Gated Tensor-Hidden Semi-Markov Model (CGT-HSMM)}. This model integrates state-dependent source calibration and sequence dynamics into a single, unified Bayesian likelihood. Additionally, it implements a stack of fail-closed mathematical gates that abstain from forecasting when parameters are unidentifiable, uninformative, or prior-dominated.
+
+---
+
+\section{Mathematical Formulation of the CGT-HSMM}
+
+Let $Z_t \in \{1, \dots, L\}$ be a discrete-time (monthly) Hidden Semi-Markov process representing the latent regime at time $t \in \{1, \dots, T\}$. Let $T_n$ denote the index of the $n$-th regime transition. The sequence of states $S_n = Z_{T_n}$ forms the embedded Markov chain. The model is discrete-time throughout; ``continuous-time HSMM'' language used in earlier drafts is withdrawn as it is inconsistent with the shifted-Poisson dwell distributions and the monthly observation grid. % %%NEEDS_HUMAN_MATH_REVIEW%%
+
+\subsection{Latent Semi-Markov Dynamics}
+The latent transition behavior is governed by two components:
+\begin{enumerate}
+    \item \textbf{Embedded Transition Matrix:} Let $\Pi \in \mathbb{R}^{L \times L}$ be the transition probability matrix of the embedded chain, with zero diagonal:
+    \[
+    \pi_{ii} = 0 \quad \forall i \in \{1, \dots, L\}
+    \]
+    enforcing that transitions must represent a change of state.
+    \item \textbf{Dwell-Time Distribution:} Let the dwell time $D_r$ in state $r$ follow a discrete probability mass function $f_r(d; \boldsymbol{\theta}_r)$ with finite mean $\mu_r = E[D_r] < \infty$.
+\end{enumerate}
+
+\subsection{State-Dependent Tensor Emissions}
+At each discrete time step $t \in \{1, \dots, T\}$, we observe a binary vector of annotations $\mathbf{Y}_t = (Y_{1,t}, \dots, Y_{S,t})^T \in \{0, 1\}^S$ from $S$ conditionally independent sources.
+
+Unlike standard models where annotator accuracy is constant, the emission distribution is conditioned on the active latent state $Z_t = r$. For each state $r$, the emission is modeled as a latent mixture representing the sub-regimes of the policy stratum:
+\begin{equation}\label{eq:joint_emission}
+P(\mathbf{Y}_t \mid Z_t = r) = \sum_{a \in \{0, 1\}} \pi_a(r) \prod_{s=1}^S (M^{(s)}_{r, a})^{Y_{s,t}} (1 - M^{(s)}_{r, a})^{1 - Y_{s,t}}
+\end{equation}
+where:
+\begin{itemize}
+    \item $\pi_1(r) = P(A_t = 1 \mid Z_t = r)$ is the sub-regime prevalence prior in state $r$, and $\pi_0(r) = 1 - \pi_1(r)$.
+    \item $M^{(s)}_{r, a}$ represents the emission parameters of independent acquisition channel $s$ conditioned on sub-regime $a$ and latent state $r$:
+    \begin{align*}
+        M^{(s)}_{r, 1} &= P(Y_{s,t} = 1 \mid A_t = 1, Z_t = r) \quad \text{(Sensitivity under state } r\text{)} \\
+        M^{(s)}_{r, 0} &= P(Y_{s,t} = 1 \mid A_t = 0, Z_t = r) \quad \text{(False Positive Rate under state } r\text{)}
+    \end{align*}
+    When the channels are coders reading the \emph{same} item, they do not satisfy the conditional-independence assumption (A2) and must instead be modeled in a separate Dawid--Skene coder-reliability layer; they do not count toward the $S \ge 3$ Kruskal source condition. % %%NEEDS_HUMAN_MATH_REVIEW%%
+\end{itemize}
+Equation~\eqref{eq:joint_emission} represents a state-dependent Canonical Polyadic (CP) tensor decomposition of the joint observation space for each latent state $r$.
+
+\subsection{Joint Posterior Density}
+Let $\Theta = \{\Pi, \{\boldsymbol{\theta}_r\}_{r=1}^L, \{\pi_a(r), \mathbf{M}_r\}_{r=1}^L\}$ be the set of all model parameters. The joint posterior density of the parameters and the latent trajectory $Z_{1:T}$ is:
+\begin{equation}\label{eq:joint_posterior}
+P(\Theta, Z_{1:T} \mid \mathbf{Y}_{1:T}) \propto P(\Theta) \left( P(Z_{1:T} \mid \Pi, \boldsymbol{\theta}) \prod_{t=1}^T P(\mathbf{Y}_t \mid Z_t, \mathbf{M}, \boldsymbol{\pi}) \right)
+\end{equation}
+where $P(\Theta)$ represents the prior distribution of the parameters.
+
+---
+
+\section{Parameter Identifiability: Proven and Conjectured Components}
+
+Because the regime sequence $Z_{1:T}$ and the sub-regime states $A_{1:T}$ are unobserved, the parameters $\Theta$ must be recovered from the joint law of the observations $P(\mathbf{Y}_{1:T})$. An earlier draft of this section claimed full identifiability of $\Theta$ via a three-stage argument whose first stage conditioned on the latent state $Z_t = r$ as if it were observable; since the per-state tensor is not a functional of the observed law, that argument was circular, and it is withdrawn (see the closing remark). This section states precisely what is proven and what is conjectured. % %%NEEDS_HUMAN_MATH_REVIEW%%
+
+\subsection{Proposition 1: Oracle-Regime Emission Identifiability (proven)}
+\begin{theorem}[Oracle-regime emission identifiability]
+Fix a regime $r$ and suppose the regime path $Z_{1:T}$ were observed. Conditional on the path, the observations $\{\mathbf{Y}_t : Z_t = r\}$ are i.i.d.\ draws from the 2-class product-Bernoulli latent class model with prevalence $\pi_1(r)$ and factor matrices % %%NEEDS_HUMAN_MATH_REVIEW%%
+\[
+M^{(s)}_r = \begin{pmatrix} 1 - M^{(s)}_{r, 0} & 1 - M^{(s)}_{r, 1} \\ M^{(s)}_{r, 0} & M^{(s)}_{r, 1} \end{pmatrix}, \qquad \det M^{(s)}_r = M^{(s)}_{r,1} - M^{(s)}_{r,0},
+\]
+and the visit set $\{t : Z_t = r\}$ grows linearly in $T$ by positive recurrence, supplying the required replication. If $S \ge 3$, $M^{(s)}_{r, 1} \neq M^{(s)}_{r, 0}$ for all $s$, and $\pi_1(r) \in (0, 1)$, then the Kruskal condition $\sum_s k(M^{(s)}_r) = 6 \ge 2R + 2$ holds and $\{\pi_a(r), \mathbf{M}_r\}$ is identifiable up to the sub-regime label swap --- exactly as in Theorem $A'$ of the companion document, whose proof (including positivity of the weights, scaling resolution by column-stochasticity, and the covariance-based exclusion of degenerate alternatives) transfers verbatim. % %%NEEDS_HUMAN_MATH_REVIEW%%
+\end{theorem}
+
+\subsection{Proposition 2: Dynamics Identifiability Given the Regime Path (proven, elementary)}
+\begin{theorem}[Oracle-path dynamics identifiability]
+If $Z_{1:T}$ were observed, the embedded transition matrix $\Pi$ and the dwell laws $f_r$ are identified in the limit $T \to \infty$ by the empirical transition frequencies of the embedded chain and the empirical dwell histograms, by the strong law of large numbers under irreducibility and positive recurrence. % %%NEEDS_HUMAN_MATH_REVIEW%%
+\end{theorem}
+
+\subsection{Full Identifiability from the Observed Law: Status}
+The substantive question is whether $\Theta$ is identified from $P(\mathbf{Y}_{1:T})$ \emph{without} the oracle path. We record the status honestly. % %%NEEDS_HUMAN_MATH_REVIEW%%
+\begin{enumerate}
+    \item \textbf{Geometric dwell (HMM special case): established in the literature.} If all $f_r$ are geometric, the model is a stationary finite HMM with state-conditional emission laws $Q_r = P(\mathbf{Y}_t \mid Z_t = r)$ on $\{0, 1\}^S$. By the HMM identifiability theorem of Allman--Matias--Rhodes (2009, Thm.~6), the HMM parameters are generically identifiable from the joint law of finitely many consecutive observations provided $\Pi$ is full rank and the emission laws $\{Q_r\}_{r=1}^L$ are linearly independent as vectors in $\mathbb{R}^{2^S}$. The within-state mixture parameters $\{\pi_a(r), \mathbf{M}_r\}$ are then recovered from each identified $Q_r$ by Proposition 1's Kruskal argument. % %%NEEDS_HUMAN_MATH_REVIEW%%
+    \item \textbf{General dwell: conjectured, with a named obstruction.} An HSMM with dwell support bounded by $d_{\max}$ embeds as an HMM on the augmented state $(Z_t, a_t)$ with at most $L \cdot d_{\max}$ states. The standard spectral conditions \emph{fail as stated} for this embedding: emission laws are shared across ages of the same regime, so the augmented emission family $\{Q_{(r, a)}\}$ contains repeated members and is never linearly independent. Identification must instead exploit longer observation windows that separate regimes through their dwell signatures. We \emph{conjecture} that $\Theta$ is identifiable under (i) full-rank $\Pi$, (ii) linearly independent regime emission laws $\{Q_r\}$, and (iii) dwell laws with distinct identifiable probability-generating functions and aperiodic lattice support (distinct finite means are a convenient sufficient diagnostic for distinctness but not a complete condition; two dwell laws can agree in mean yet be separated by higher moments, and conversely distinct means do not guarantee linear independence of the regime emission laws); we do not prove it. The conjecture is probed operationally by simulation-based calibration, which would expose non-identifiability as multimodal or non-converging posteriors across simulated worlds. % %%NEEDS_HUMAN_MATH_REVIEW%%
+    \item \textbf{Label anchoring (downstream of identifiability).} Whatever identification holds is up to a permutation of regime labels. The production implementation anchors on the ordered first-tactic activity vector (the \texttt{ordered} declaration in \texttt{m01\_forward.stan}); distinct dwell means provide an alternative anchor. Anchoring resolves the label permutation; it cannot create identifiability that is otherwise absent. % %%NEEDS_HUMAN_MATH_REVIEW%%
+\end{enumerate}
+
+\begin{remark}[Withdrawn claims from the earlier draft]
+Three steps of the earlier ``proof'' are withdrawn: (i) Stage 1 applied Kruskal's theorem to the per-state tensor $(T_r)_{ijk} = P(\mathbf{Y}_t = \cdot \mid Z_t = r)$, which is not observable --- the observed law is the mixture over $r$, and disaggregating it is the very thing to be proven; (ii) Stage 2 cited ``the path uniqueness of semi-Markov processes (Allman et al., 2009)'' --- no such result appears in that reference; (iii) Stage 3 estimated $\Pi$ and $f_r$ from latent transition times that are not data, which presupposes Stage 2. Propositions 1--2 retain the salvageable content of Stages 1 and 3 under an explicit oracle hypothesis; the unproven gap is isolated in the conjecture above. % %%NEEDS_HUMAN_MATH_REVIEW%%
+\end{remark}
+
+---
+
+\section{Effective Sample Size under Dependent Observations}
+
+We analyze how the information about the sub-regime prevalence $\pi_1(r)$ scales when observations are not independent but are coupled to the latent transition structure. The object controlled below is the asymptotic variance of the \emph{marginal-score} (composite-likelihood) estimator. $I_F^{(\mathrm{marg})}$ is the Godambe information of the marginal-score estimator and is used as a conservative operational diagnostic; we do not claim it universally bounds the full-likelihood Fisher information of the HSMM (that claim would require additional regularity and nuisance-parameter conditions not verified here). The resulting gates are conservative in their operational design stance. % %%NEEDS_HUMAN_MATH_REVIEW%%
+
+\subsection{Theorem 2: Effective Sample Size under Temporal Dependency}
+\begin{theorem}[Dependent-Sample Information Scaling]
+Let $Y_{1:N}$ be a stationary binary observation sequence from the channel model with informativeness $I_r = |\rho_r - \delta_r|$ and marginal success probability $p_r$, driven by a stationary latent activity process $A_t$ with summable autocovariances and satisfying the positivity condition $\gamma_0 + 2\sum_{h \ge 1} \gamma_h > 0$ (required for the asymptotic variance to be finite). Let $s_t$ be the per-observation marginal score for $\pi_1(r)$, with autocovariances $\gamma_h = \mathrm{Cov}(s_0, s_h)$. Then the estimator solving the marginal score equation $\sum_t s_t = 0$ has asymptotic variance $\big( N_{\mathrm{eff}}\, I_r^2 / (p_r(1-p_r)) \big)^{-1}$, where % %%NEEDS_HUMAN_MATH_REVIEW%%
+\begin{equation}\label{eq:dependent_fisher}
+N_{\mathrm{eff}} \;=\; N\, \frac{\gamma_0}{\gamma_0 + 2 \sum_{h \ge 1} \gamma_h}. % %%NEEDS_HUMAN_MATH_REVIEW%%
+\end{equation}
+If, in addition, $A_t$ is a \emph{binary first-order Markov chain} with non-unit eigenvalue $\lambda \in [0, 1)$, then $\mathrm{Corr}(A_0, A_h) = \lambda^h$ exactly and % %%NEEDS_HUMAN_MATH_REVIEW%%
+\begin{equation}\label{eq:ar1_corollary}
+N_{\mathrm{eff}} = \frac{N}{1 + 2c\, \dfrac{\lambda}{1 - \lambda}}, \qquad c = \frac{I_r^2\, \pi_1(r)(1 - \pi_1(r))}{p_r(1 - p_r)} \in (0, 1], % %%NEEDS_HUMAN_MATH_REVIEW%%
+\end{equation}
+and the textbook expression $N(1-\lambda)/(1+\lambda)$ (the specialization $c = 1$) is a conservative lower bound on $N_{\mathrm{eff}}$. For the CGT-HSMM itself the activity process is \emph{not} first-order Markov, and \eqref{eq:ar1_corollary} is a labeled approximation only; see the remark following the proof. % %%NEEDS_HUMAN_MATH_REVIEW%%
+\end{theorem}
+
+\subsection{Step-by-Step Proof}
+\begin{proof}
+\textbf{Step 1 (sandwich variance).} The marginal score is $s_t = I_r (Y_t - p_r) / (p_r(1 - p_r))$, a stationary mean-zero sequence with $\gamma_0 = I_r^2 / (p_r(1-p_r))$. For the M-estimator solving $\sum_{t=1}^N s_t(\hat\pi) = 0$, standard sandwich asymptotics give $\sqrt{N}(\hat\pi - \pi) \Rightarrow \mathcal{N}(0, V / H^2)$ with $H = \gamma_0$ (the expected negative score derivative, which here equals the marginal information) and long-run score variance % %%NEEDS_HUMAN_MATH_REVIEW%%
+\[
+V = \lim_{N \to \infty} \frac{1}{N} \mathrm{Var}\Big( \sum_{t=1}^N s_t \Big) = \gamma_0 + 2 \sum_{h \ge 1} \gamma_h,
+\]
+where the limit uses the Ces\`aro convergence $\lim_N \big[ \gamma_0 + 2\sum_{h=1}^{N-1} (1 - h/N)\, \gamma_h \big] = \gamma_0 + 2\sum_{h \ge 1} \gamma_h$ under summability. The asymptotic variance is therefore $V / (N H^2) = \big( N_{\mathrm{eff}}\, \gamma_0 \big)^{-1}$ with $N_{\mathrm{eff}}$ as in \eqref{eq:dependent_fisher}. % %%NEEDS_HUMAN_MATH_REVIEW%%
+
+\textbf{Step 2 (score autocovariance reduces to activity autocovariance).} Since $P(Y_t = 1 \mid A_t) = \delta_r + I_r A_t$ and the channel noise is independent across $t$ given the activity path, for $h \ge 1$ we have $\mathrm{Cov}(Y_0, Y_h) = I_r^2\, \mathrm{Cov}(A_0, A_h)$, hence % %%NEEDS_HUMAN_MATH_REVIEW%%
+\[
+\frac{\gamma_h}{\gamma_0} = c\, \mathrm{Corr}(A_0, A_h), \qquad c = \frac{I_r^2\, \pi_1(r)(1 - \pi_1(r))}{p_r(1 - p_r)},
+\]
+and $c \le 1$ by the law of total variance, $p_r(1 - p_r) = E[\mathrm{Var}(Y \mid A)] + I_r^2\, \pi_1(r)(1 - \pi_1(r))$, with equality only for a noiseless channel. % %%NEEDS_HUMAN_MATH_REVIEW%%
+
+\textbf{Step 3 (Markov corollary).} If $A_t$ is a two-state Markov chain, its autocorrelation is exactly $\lambda^h$, where $\lambda$ is the single non-unit eigenvalue of its transition matrix (this exactness is special to two states; for $L > 2$ the autocorrelation of an indicator is a mixture of eigenvalue powers). Substituting $\gamma_h = \gamma_0\, c\, \lambda^h$ into \eqref{eq:dependent_fisher} and summing the geometric series yields \eqref{eq:ar1_corollary}; setting $c = 1$ shrinks $N_{\mathrm{eff}}$ further, so $N(1-\lambda)/(1+\lambda) \le N_{\mathrm{eff}}$. % %%NEEDS_HUMAN_MATH_REVIEW%%
+\end{proof}
+
+\begin{remark}[Why the AR(1) form fails for the CGT-HSMM, and in which direction]
+In the CGT-HSMM the activity is driven by the semi-Markov regime layer: the discrete-time regime process is a renewal-type process, not a Markov chain, so ``the subdominant eigenvalue of the transition matrix of the latent states'' is undefined, and $\mathrm{Corr}(A_0, A_h)$ is a renewal functional of the dwell-time laws. Two failure modes of any single-$\lambda$ fit follow. (i) For \emph{overdispersed} dwell distributions, the autocorrelation decays sub-geometrically over the relevant lags; a geometric fit understates $\sum_h \gamma_h$ and \emph{overstates} $N_{\mathrm{eff}}$ --- anti-conservative, the dangerous direction. (ii) For \emph{strongly concentrated} (quasi-periodic) dwell, the autocorrelation oscillates with negative lobes; $\sum_h \gamma_h$ shrinks or turns negative and the AR(1) form is over-conservative. Therefore \eqref{eq:dependent_fisher} must be evaluated with $\sum_h \mathrm{Corr}(A_0, A_h)$ computed from the fitted dwell and transition posteriors, and \eqref{eq:ar1_corollary} may be reported only as a labeled approximation. The Godambe information of the marginal-score estimator is used as a conservative operational diagnostic. We do not claim it equals or universally bounds the full HSMM likelihood information. Gating on \eqref{eq:dependent_fisher} is conservative by design stance, not by a general Fisher-information ordering theorem. % %%NEEDS_HUMAN_MATH_REVIEW%%
+\end{remark}
+
+---
+
+\section{Adversarial Mathematical Audit: Novelty \& Critiques}
+
+To assess whether the CGT-HSMM represents a genuine mathematical contribution, we audit the framework against potential criticisms.
+
+\subsection{Is the Model Genuinely Novel?}
+\begin{itemize}
+    \item \textbf{Yes, in its coupling of states and errors:} Existing crowdsourcing models (e.g., Dawid-Skene, HMM-Crowd) treat annotator expertise as a static attribute of the coder. The CGT-HSMM models annotator sensitivity and false-positive rates as \textbf{state-dependent variables} ($\rho_s(Z_t), \delta_s(Z_t)$) that shift dynamically based on the latent discrete-time regime.
+    \item \textbf{Contribution: the integration.} The contribution is the integration of state-dependent source calibration, semi-Markov latent regimes, and pre-registered abstention gates in one Bayesian architecture. Related ideas exist separately in latent-class modeling, HSMMs, selective prediction, decision-theoretic abstention, and conformal risk control; the claimed novelty is the specific coupling and gate stack, not the invention of each component. A systematic literature review of close prior art (abstaining classifiers, safe screening, Bayesian decision rejection, robust multiple testing) is required before asserting novelty in any submission. % %%NEEDS_HUMAN_MATH_REVIEW%%
+\end{itemize}
+
+\subsection{Theoretical Critique 1: The Curse of State-Dependent Parameter Inflation}
+\begin{critique}
+By conditioning the source parameters on the latent states, the number of parameters increases from $2S$ (in standard Dawid-Skene) to $2S \times L$ (in CGT-HSMM). In finite samples, this parameter inflation will lead to overfitting, high posterior variance, and a failure of the MCMC sampler to converge.
+\end{critique}
+
+\begin{defense}
+To mitigate parameter inflation, we introduce a \textbf{hierarchical shrinkage prior} on the source parameters. We model the state-dependent parameters as deviations from a global source profile:
+\[
+M^{(s)}_{r, a} \sim \text{Beta}(\alpha_{s, a} \cdot \kappa, \beta_{s, a} \cdot \kappa)
+\]
+where the prior mean $\alpha_{s, a} / (\alpha_{s, a} + \beta_{s, a})$ encodes the global (state-free) profile of source $s$ for sub-regime $a$, and $\kappa$ is a concentration parameter setting the strength of shrinkage toward that profile. % %%NEEDS_HUMAN_MATH_REVIEW%% This framework allows the model to share information across states when data is sparse, while still allowing the parameters to adapt to state-specific noise levels when data is abundant.
+\end{defense}
+
+\subsection{Theoretical Critique 2: The Alignment and Label-Switching Problem}
+\begin{critique}
+Because MCMC samplers are invariant to permutations of the latent state labels, the model will suffer from label-switching during sampling. If the labels switch, the state-dependent source parameters ($\rho_s(r), \delta_s(r)$) will mix across chains, rendering the posterior draws uninterpretable and invalidating the gates.
+\end{critique}
+
+\begin{defense}
+To resolve the label-switching problem, we implement two constraints:
+\begin{enumerate}
+    \item \textbf{Ordering Constraint:} We enforce an ordering constraint on the expected dwell times:
+    \[
+    \mu_1 < \mu_2 < \dots < \mu_L
+    \]
+    Since the states are ordered by their expected dwell, the labels are anchored, preventing permutation during sampling. (The production implementation anchors instead on the ordered first-tactic activity vector --- the \texttt{ordered} declaration in \texttt{m01\_forward.stan} --- which serves the same purpose. Whichever anchor is chosen must be pre-registered, and any ordering constraint mildly distorts the posterior when the true ordered quantities are nearly tied.) % %%NEEDS_HUMAN_MATH_REVIEW%%
+    \item \textbf{Identifiability Relabeling:} During the post-processing of MCMC chains, we apply a relabeling algorithm (e.g., the Stephens algorithm) that minimizes the Kullback-Leibler divergence between the state-conditional emission distributions across draws, ensuring consistent parameter alignment.
+\end{enumerate}
+\end{defense}
+
+---
+
+\section{Conclusion}
+The CGT-HSMM couples state-dependent tensor emissions with semi-Markov dynamics, addressing the variance underestimation of decoupled calibrate-then-forecast pipelines. The adversarial audit yields a mixed but honest verdict: oracle-regime emission identifiability and the dependent-sample information correction are proven; full-model identifiability is established only in the geometric-dwell special case and is otherwise an explicitly stated conjecture probed by simulation-based calibration; parameter inflation and label switching are mitigated --- not eliminated --- by hierarchical shrinkage and pre-registered anchoring. The framework's scientific defensibility rests on this explicit separation of proven, conjectured, and mitigated claims, together with fail-closed gating when the proven conditions are not met. % %%NEEDS_HUMAN_MATH_REVIEW%%
+
+\end{document}

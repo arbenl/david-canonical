@@ -141,6 +141,7 @@ export const api = {
   },
   sourceIndependence:  () => get<SourceIndependence>("/sources/independence"),
   automationStatus:    () => get<AutomationStatus>("/automation/status"),
+  taxonomy:            () => get<{ domain: string; tactics: Array<{ id: string; name: string; question: string; hint: string }> }>("/taxonomy"),
 };
 
 

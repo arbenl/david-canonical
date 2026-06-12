@@ -40,6 +40,7 @@ What is automated and what requires a human.
 - Modifying source rho / delta priors without quarterly review.
 - Changing the falsification thresholds (F1..F15) at runtime.
 - Skipping a fail-closed gate.
+- Authoring primary mathematical, theoretical, or thesis-chapter documentation as plain markdown (all formal documents must be written in LaTeX with TikZ/pgfplots vector diagrams).
 
 ## How to know automation is working
 

@@ -2,10 +2,17 @@
 
 For each stratum g, the identification distance is
 
-    d(theta) = min over s of {
-        min(|rho_s - delta_s|, |rho_s - (1 - delta_s)|),
-        min(phi_g, 1 - phi_g)
-    }
+    d(theta) = min(
+        J_(3),                     # third-largest Youden J across source families
+        min(phi_g, 1 - phi_g)      # activity margin
+    )
+
+where J_(3) = third-largest |rho_s - delta_s| across source families s.
+Kruskal identifiability requires three informative independent source views, not
+all S views. Using min_s J_s would penalise an identified stratum because one
+nuisance source is weak. When S < 3 the stratum is under-sourced; the
+conventional min_s is used as a conservative fallback (the gate will likely
+fail on d_theta anyway since the rank condition is not met).
 
 Strata with posterior median d below `floor` are flagged
 practically_non_identified. They are generically identifiable per Allman-Matias-
@@ -51,10 +58,16 @@ def identification_distance_draws(
     if phi_draws.shape[0] != rho_draws.shape[0]:
         raise ValueError("draw dimension mismatch between phi and rho")
 
-    informativeness = np.abs(rho_draws - delta_draws)  # (D, S)
-    label_flip_safety = np.abs(rho_draws - (1.0 - delta_draws))  # (D, S)
-    source_min = np.minimum(informativeness, label_flip_safety)  # (D, S)
-    per_draw_source = source_min.min(axis=1)  # (D,)
+    J_draws = np.abs(rho_draws - delta_draws)  # (D, S); Youden J per draw per source
+    S = J_draws.shape[1]
+    if S >= 3:
+        # Kruskal requires 3 informative views, not all S. Sort descending and
+        # take the third-largest J so a single weak nuisance source cannot veto
+        # an otherwise identified stratum.
+        J_sorted = np.sort(J_draws, axis=1)[:, ::-1]  # (D, S) descending
+        per_draw_source = J_sorted[:, 2]               # J_(3)
+    else:
+        per_draw_source = J_draws.min(axis=1)          # S<3: under-sourced fallback
     phi_boundary = np.minimum(phi_draws, 1.0 - phi_draws)
     return np.minimum(per_draw_source, phi_boundary)
 

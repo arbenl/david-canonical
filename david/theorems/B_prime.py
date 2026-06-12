@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..config import INFORMATIVENESS_FLOOR_LOWER_95
+from ..config import INFORMATIVENESS_FLOOR_LOWER_95, N_EFF_I2_FLOOR
 
 
 @dataclass(frozen=True)
@@ -59,20 +59,33 @@ def check_cell(
     delta_draws: np.ndarray,
     n_replicates: int,
     floor_lower_95: float = INFORMATIVENESS_FLOOR_LOWER_95,
+    n_eff_i2_floor: float = N_EFF_I2_FLOOR,
 ) -> InformativenessResult:
     I = informativeness_draws(rho_draws, delta_draws)
     median = float(np.median(I))
     lower, upper = (float(x) for x in np.quantile(I, [0.025, 0.975]))
     n_eff = effective_sample_size(n_replicates, median)
-    if lower >= floor_lower_95:
+    # Gate 1: I lower-95 floor (weak-signal guard)
+    if lower < floor_lower_95:
         return InformativenessResult(
             cell_id=cell_id,
             posterior_median_I=median,
             lower_95_I=lower,
             upper_95_I=upper,
             n_eff_phi_estimate=n_eff,
-            gate_status="pass",
-            reason="I_lower_95_above_floor",
+            gate_status="fail",
+            reason=f"I_lower_95_{lower:.4f}_below_floor_{floor_lower_95:.4f}",
+        )
+    # Gate 2: N_eff × I² floor — rules out I=0.11 with N=5 (reviewer §5)
+    if n_eff < n_eff_i2_floor:
+        return InformativenessResult(
+            cell_id=cell_id,
+            posterior_median_I=median,
+            lower_95_I=lower,
+            upper_95_I=upper,
+            n_eff_phi_estimate=n_eff,
+            gate_status="fail",
+            reason=f"N_eff_I2_{n_eff:.2f}_below_floor_{n_eff_i2_floor:.2f}",
         )
     return InformativenessResult(
         cell_id=cell_id,
@@ -80,6 +93,6 @@ def check_cell(
         lower_95_I=lower,
         upper_95_I=upper,
         n_eff_phi_estimate=n_eff,
-        gate_status="fail",
-        reason=f"I_lower_95_{lower:.4f}_below_floor_{floor_lower_95:.4f}",
+        gate_status="pass",
+        reason="I_lower_95_and_N_eff_I2_above_floor",
     )

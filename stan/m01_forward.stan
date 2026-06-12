@@ -373,7 +373,20 @@ generated quantities {
 
     // 3) Sample terminal regime.
     int z_now = categorical_rng(z_T_post);
-    int dwell_remaining = shifted_poisson_rng(dwell_lambda[z_now]);
+    // Stationary residual dwell at T (renewal-theory correction).
+    // A fresh draw from ShiftedPoisson(λ) overestimates remaining life because
+    // the current interval was already partially consumed before t=T.
+    // Under the stationary renewal distribution, interval length D* is
+    // length-biased (weight ∝ d·f(d)); given D*, residual is Uniform(1, D*).
+    // For ShiftedPoisson(λ): D* ~ Mixture(1/(λ+1): SP(λ),  λ/(λ+1): SP(λ)+1).
+    real p_base = 1.0 / (dwell_lambda[z_now] + 1.0);
+    int d_star;
+    if (bernoulli_rng(p_base)) {
+      d_star = shifted_poisson_rng(dwell_lambda[z_now]);
+    } else {
+      d_star = shifted_poisson_rng(dwell_lambda[z_now]) + 1;
+    }
+    int dwell_remaining = categorical_rng(rep_vector(1.0 / d_star, d_star));
 
     // 4) Step forward H_forecast months.
     for (h in 1:H_forecast) {

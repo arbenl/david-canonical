@@ -388,6 +388,54 @@ def code_uncoded_from_db(
     return code_evidence(items, llm_pool, tactic_classes)
 
 
+def code_missing_tactics_from_db(
+    llm_pool: list,
+    new_tactic_ids: list[str],
+    limit: int = 2000,
+) -> list[dict]:
+    """Backfill coder_labels for tactics added after the initial coding run.
+
+    Targets items that already have some labels (e.g. from a 3-tactic run) but
+    have never been evaluated against any of new_tactic_ids. Safe to re-run —
+    the upsert in code_evidence() is idempotent.
+    """
+    from types import SimpleNamespace
+    from ..db.connection import get_conn
+
+    if not new_tactic_ids:
+        return []
+
+    placeholders = ",".join(["%s"] * len(new_tactic_ids))
+    n_new = len(new_tactic_ids)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT e.evidence_id, e.text_content
+                FROM   evidence_items e
+                WHERE  e.text_content IS NOT NULL
+                  AND  length(e.text_content) > 50
+                  AND  e.stratum_id NOT LIKE 'gl\\_%%' ESCAPE '\\'
+                  AND  (
+                           SELECT COUNT(DISTINCT cl.tactic_k)
+                           FROM   coder_labels cl
+                           WHERE  cl.evidence_id = e.evidence_id
+                             AND  cl.tactic_k IN ({placeholders})
+                       ) < %s
+                ORDER  BY e.evidence_date DESC
+                LIMIT  %s
+                """,
+                (*new_tactic_ids, n_new, limit),
+            )
+            rows = cur.fetchall()
+
+    if not rows:
+        return []
+
+    items = [SimpleNamespace(evidence_id=r[0], text=r[1]) for r in rows]
+    return code_evidence(items, llm_pool, new_tactic_ids)
+
+
 # ─── calibration ─────────────────────────────────────────────────────────────
 
 def _load_gold_labels(gold_path: Path) -> dict[str, int]:
@@ -455,6 +503,7 @@ def _load_coded_labels(coded_dir: Path) -> list[dict]:
 def _build_stan_data(
     gold: dict[str, int],
     coded: list[dict],
+    tactic_subset: set[str] | None = None,
 ) -> dict | None:
     """Build the Dawid-Skene data dict for coder_calibration.stan.
 
@@ -478,6 +527,8 @@ def _build_stan_data(
     label_map: dict[tuple[str, str], int] = defaultdict(int)
     coder_set: set[str] = set()
     for rec in coded:
+        if tactic_subset and rec.get("tactic_class") not in tactic_subset:
+            continue
         eid = rec.get("evidence_id", "").strip()
         cid = rec.get("coder_id", "").strip()
         y   = int(rec.get("Y", 0))
@@ -572,7 +623,7 @@ def calibrate_coders() -> dict:
         }
 
     # Build Stan data
-    stan_data = _build_stan_data(gold, coded)
+    stan_data = _build_stan_data(gold, coded, tactic_subset={"SIO", "MIO", "CSIO"})
     if stan_data is None:
         return {
             "gate_status": "fail",

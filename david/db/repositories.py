@@ -96,18 +96,20 @@ def get_adjudicated_data() -> dict[str, list[dict[str, str]]]:
     }
 
 
-def get_fit_runs(limit: int = 10) -> list[dict[str, Any]]:
+def get_fit_runs(limit: int = 10, require_pass: bool = False) -> list[dict[str, Any]]:
     """Return the most recent fit runs (newest first)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("""
+            sql = """
                 SELECT run_id, model_version, gate_status,
                        rhat_max, ess_bulk_min, divergences,
                        n_strata, n_labels, started_at
                 FROM   fit_runs
-                ORDER  BY started_at DESC
-                LIMIT  %s
-            """, (limit,))
+            """
+            if require_pass:
+                sql += " WHERE gate_status = 'pass'"
+            sql += " ORDER BY started_at DESC LIMIT %s"
+            cur.execute(sql, (limit,))
             cols = [d[0] for d in cur.description]
             return [dict(zip(cols, row)) for row in cur.fetchall()]
 

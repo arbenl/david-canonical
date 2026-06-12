@@ -111,19 +111,36 @@ diagnostic:
 
 ### 3.1 Identification distance (Theorem A' practical check)
 
-For each stratum g, compute
+For each stratum g, compute per MCMC draw
 
 ```
-d(theta) = min over s of {
-    min(|rho_s - delta_s|, |rho_s - (1 - delta_s)|),
-    min(phi_g, 1 - phi_g)
-}
+d(theta) = min( J_(3), min(phi_g, 1 - phi_g) )
 ```
 
-posterior median. Strata with median d below floor (default 0.05) are flagged
-practically_non_identified and excluded from headline forecasts.
+where J_(3) is the third-largest per-source Youden index J_s = |rho_s - delta_s|
+(sorted descending). J_(3) matches the identifiability theorem: Kruskal's
+condition requires three independent informative views, not all S, so using
+min over all s would disqualify an identified stratum merely because one weak
+nuisance source is included. When S < 3, the conservative fallback min_s J_s is
+used (the stratum fails FG2 regardless, since the Kruskal rank condition is
+unmet).
 
-Implementation: `david/engine/identification_distance.py`
+Strata with posterior median d below floor (default 0.05,
+`ID_DISTANCE_FLOOR`) are flagged practically_non_identified and excluded from
+headline forecasts.
+
+AUDIT CORRECTION (June 2026 math audit): an earlier draft of this section
+included a `|rho_s - (1 - delta_s)|` term. That term is WITHDRAWN. The
+anti-diagonal rho = 1 - delta is NOT a non-identification boundary — the
+symmetric channel (rho, delta) = (0.9, 0.1) lies on it with J = 0.8 and is
+among the most informative channels. The only singular boundary is the
+diagonal rho = delta. See `thesis_mathematical_core.tex`, Theorem A'
+operational diagnostic.
+
+Implementation: `david/engine/identification_distance.py` (must implement the
+corrected formula above; note that `tests/test_identification_distance.py`
+historically asserted against the withdrawn label-flip term and requires
+realignment — tracked as an implementation-conformance item)
 
 ### 3.2 Channel informativeness (Theorem B'.2)
 
@@ -133,9 +150,33 @@ For each cell, compute observability informativeness
 I(O) = |rho(O) - delta(O)|
 ```
 
-with posterior credible interval. Cells with upper-CI I below floor (default
-0.10) are flagged prior_dominated and reported with prior interval, not point
-forecast.
+with posterior credible interval. Gate FG3 imposes TWO co-registered
+conditions, both of which must hold (constants in `david/config.py`):
+
+1. Informativeness floor: the LOWER endpoint of the central 95% credible
+   interval of I(O) — i.e. the 2.5% posterior quantile — must satisfy
+   `I_lower_95 >= INFORMATIVENESS_FLOOR_LOWER_95 = 0.10`. (An earlier draft of
+   this section said "upper-CI", which contradicted both §7.2 and the thesis
+   core; the lower endpoint is the operative quantity — the gate must hold
+   even under the pessimistic end of posterior uncertainty.)
+2. Information floor: `N_eff * I^2 >= N_EFF_I2_FLOOR = 3.0`, where I is the
+   posterior median informativeness and N_eff is the replicate count,
+   dependence-adjusted via the score-autocovariance (Godambe) correction
+   N_eff = N * gamma_0 / (gamma_0 + 2 * sum_{h>=1} gamma_h), capped at
+   min(N, N_eff). Rationale: below this floor the Cramér–Rao variance scale
+   exceeds 1/12 (the variance of a Uniform(0,1) prior) at the worst operating
+   point — the cell cannot beat knowing nothing.
+
+Cells failing either condition are flagged prior_dominated and reported with
+prior interval, not point forecast.
+
+OPEN LIMITATION (carried from June 2026 math audit, item #6): whether the
+replicate count supplied to Gate FG3 in the PRODUCTION pipeline is actually
+dependence-adjusted (N_eff per the formula above, computed from the fitted
+dwell/transition posteriors) — rather than the raw N — could not be verified
+from the audited files. Until verified, FG3 results on serially dependent
+units must be treated as potentially anti-conservative. Verification is a
+blocking item for headline routing on time-indexed strata.
 
 Implementation: `david/theorems/B_prime.py`
 
@@ -159,12 +200,25 @@ Var(A_{g, t+h}) = signal_h + prior_drift_h
 
 where prior_drift_h is the expected drift toward the marginal regime
 distribution under repeated HSMM transitions. Define horizon-validity h* as
+the FIRST CROSSING of the drift threshold:
 
 ```
-h* = max { h : prior_drift_h / Var(A_{g, t+h}) < tau }
+h* = min { h >= 1 : drift(h) >= tau } - 1
 ```
 
-with tau = 0.5 by default. Forecasts at h > h* are returned as the marginal
+with tau = 0.5 by default (`HORIZON_PRIOR_DRIFT_TAU`), and h* set to the
+maximal emitted horizon if no crossing occurs.
+
+AUDIT CORRECTION (June 2026 math audit): the earlier max-form definition
+`h* = max { h : drift(h) < tau }` is WITHDRAWN. drift(h) is not proven
+monotone in h, so the max-form could admit horizons BEYOND a first crossing
+whenever the drift dips back below tau; the first-crossing form is the
+conservative reading and is the operative one. h* is an estimated diagnostic
+(Monte Carlo over posterior draws), not a certified validity boundary, and
+should be reported with its posterior spread (e.g. h* induced by the 5% and
+95% drift envelopes).
+
+Forecasts at h > h* are returned as the marginal
 regime prediction, not the conditional one, and the route is labeled
 horizon_prior_dominated.
 
@@ -420,7 +474,9 @@ For each (c, t_now, p, k, horizon h in {3, 6, 9, 12} months):
 - FG1: All measurement gates F1, F3, F4, F5 pass on the fit run.
 - FG2: Theorem A' identification_distance posterior median >= 0.05 for the cell
   stratum.
-- FG3: Theorem B' I(O) lower 95% CI >= 0.10 for the cell.
+- FG3: Theorem B' — BOTH conditions for the cell: (a) I(O) lower 95% CI
+  >= 0.10, and (b) N_eff * I^2 >= 3.0 with N_eff dependence-adjusted per
+  §3.2 (production adjustment status: open audit item #6).
 - FG4: Forecast SBC F14 pass on the current model version.
 - FG5: h <= h* (Theorem D-forecast horizon validity).
 - FG6: Endogenous observability sensitivity interval width <= 0.20.
@@ -581,3 +637,13 @@ and the stated falsification battery, the model has either earned the right
 to predict or has fail-closed honestly."
 
 That distinction is what makes the system defensible.
+
+---
+
+## 14. Documentation Standards & Scientific Publication Rule
+
+To preserve the academic and mathematical rigor of the DAVID project, all written documentation, thesis chapters, and design reports must adhere to the following permanent standards:
+
+1. **LaTeX Requirement:** Any formal document describing the mathematics, implementation, or results of the predictive engine must be authored in LaTeX (`.tex` files) and compiled into scientific-publication-ready PDFs. Plain-text markdown files should only serve as quick summaries or indices.
+2. **Premium Vector Graphics:** Diagrams, workflows, and charts must not use hand-drawn shapes or rasterized screenshots. They must be defined programmatically as vector graphics using **TikZ** (for flowcharts/system maps) and **pgfplots** (for probability distributions, Bayes error bounds, and trajectory curves) directly inside the LaTeX source.
+3. **Reproducibility:** The LaTeX source files must be checked into the `docs/` folder alongside their compiled PDFs so they can be re-compiled and verified by any reviewer using standard tools (such as `tectonic` or `pdflatex`).

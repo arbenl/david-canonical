@@ -89,7 +89,7 @@ def test_check_cell_passes_when_lower95_above_floor():
     res = check_cell("g1", rho, delta, n_replicates=50)
     assert res.gate_status == "pass"
     assert res.lower_95_I >= INFORMATIVENESS_FLOOR_LOWER_95
-    assert res.reason == "I_lower_95_above_floor"
+    assert res.reason == "I_lower_95_and_N_eff_I2_above_floor"
 
 
 def test_check_cell_fails_when_lower95_below_floor():
@@ -109,3 +109,88 @@ def test_check_cell_reports_n_eff_from_median():
     res = check_cell("g3", rho, delta, n_replicates=200)
     assert res.posterior_median_I == pytest.approx(0.5)
     assert res.n_eff_phi_estimate == pytest.approx(200 * 0.5 ** 2)  # = 50
+
+
+def test_check_cell_fails_gate2_when_n_too_small():
+    # Gate 1 passes (I_lower95 = 0.20 >> 0.10) but N_eff × I² = 2 × 0.20² = 0.08 < 3.0.
+    rho = np.full(2000, 0.60)
+    delta = np.full(2000, 0.40)   # I = 0.20 deterministically; lower_95 = 0.20
+    res = check_cell("g4", rho, delta, n_replicates=2)
+    assert res.gate_status == "fail", "small-N cell should fail gate 2 even with adequate I"
+    assert "N_eff_I2" in res.reason
+
+
+# ── Production-gate acceptance test ───────────────────────────────────────────
+# Verifies that _run_theorem_gates in fit.py enforces the N_eff × I² floor
+# (gate 2) in addition to the I_lower95 floor (gate 1).  This was a known gap:
+# the pre-registered N_EFF_I2_FLOOR = 3.0 was imported but never applied.
+
+class _MockFit:
+    """Minimal fit mock: returns preset draws for each stan_variable name."""
+    def __init__(self, variables: dict):
+        self._vars = variables
+
+    def stan_variable(self, name: str):
+        if name not in self._vars:
+            raise KeyError(f"mock has no variable {name!r}")
+        return self._vars[name]
+
+
+def _make_mock_fit(D: int, S: int, L: int, K: int, I_val: float):
+    """Build a MockFit where all sources have informativeness I_val."""
+    rng = np.random.default_rng(42)
+    # delta ~ 0.10, rho = delta + I so that |rho - delta| = I_val
+    delta_raw = np.full((D, S), -2.2)         # sigmoid(-2.2) ≈ 0.10
+    j_raw     = np.full((D, S),  np.log(I_val / (1.0 - I_val)))  # sigmoid(j_raw) = I_val
+    return _MockFit({
+        "delta_raw":          delta_raw,
+        "j_raw":              j_raw,
+        "delta_observability": np.zeros((D, S)),
+        "j_observability":    np.zeros((D, S)),
+        "alpha_activity":     np.zeros((D, L, K)),   # sigmoid(0) = 0.5
+        "dwell_lambda":       np.ones((D, L)),
+        "log_jump":           np.full((D, L, L), -np.log(L)),
+    })
+
+
+def test_production_gate_enforces_n_eff_i2_floor():
+    """Gate 2 (N_eff × I² ≥ 3.0) must fire in _run_theorem_gates.
+
+    Scenario: I = 0.15 (passes gate 1: 0.15 > 0.10), but N_units = 3,
+    so N_eff × I² = 3 × 0.15² = 0.0675 < 3.0 → gate 2 should fail.
+    """
+    from david.model.fit import _run_theorem_gates
+
+    D, S, L, K = 400, 3, 2, 3
+    I_val = 0.15          # just above gate-1 floor of 0.10
+    n_units = 3           # tiny stratum → N_eff × I² << 3.0
+
+    mock_fit = _make_mock_fit(D, S, L, K, I_val)
+    data = {"U": n_units, "R": 1, "T": n_units, "K": K, "S": S, "M": 1, "L": L,
+            "H_forecast": 1}
+
+    gates = _run_theorem_gates(mock_fit, data)
+    b = gates["B_prime"]
+    assert b["gate_status"] == "fail", (
+        f"expected gate 2 failure (N_eff×I²={b.get('n_eff_i2', '?'):.3f} < 3.0) "
+        f"but got: {b}"
+    )
+    assert "N_eff_I2" in b["reason"]
+
+
+def test_production_gate_passes_when_both_gates_met():
+    """Both gate 1 (I_lower95 ≥ 0.10) and gate 2 (N_eff×I² ≥ 3.0) must pass."""
+    from david.model.fit import _run_theorem_gates
+
+    D, S, L, K = 400, 3, 2, 3
+    I_val = 0.50          # well above both thresholds
+    n_units = 50          # N_eff × I² = 50 × 0.25 = 12.5 >> 3.0
+
+    mock_fit = _make_mock_fit(D, S, L, K, I_val)
+    data = {"U": n_units, "R": 1, "T": n_units, "K": K, "S": S, "M": 1, "L": L,
+            "H_forecast": 1}
+
+    gates = _run_theorem_gates(mock_fit, data)
+    b = gates["B_prime"]
+    assert b["gate_status"] == "pass", f"expected pass but got: {b}"
+    assert b["reason"] == "I_lower_95_and_N_eff_I2_above_floor"

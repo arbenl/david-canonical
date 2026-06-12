@@ -18,7 +18,12 @@ from .engine import orchestrator
 from .engine.forecast import emit_forecasts
 from .engine.router import apply_forecast_routing
 from .ingest.adjudicator_queue import auto_adjudicate, build_queue
-from .ingest.llm_coder import calibrate_coders, code_evidence, load_llm_pool
+from .ingest.llm_coder import (
+    calibrate_coders,
+    code_evidence,
+    code_missing_tactics_from_db,
+    load_llm_pool,
+)
 from .ingest.normalize import normalize_raw
 from .ingest.sources import run_scrapers
 from .model.fit import run_fit
@@ -118,6 +123,41 @@ def ingest(
         f"{adj.get('auto_adjudicated', 0)} auto-adjudicated, "
         f"{adj.get('queued_for_human', 0)} queued"
     )
+
+
+@app.command("backfill-tactics")
+def backfill_tactics_cmd(
+    limit: int = typer.Option(2000, help="Max items per run (safe to re-run)"),
+) -> None:
+    """Backfill coder_labels for tactics added after the initial coding run.
+
+    Run once after expanding domain_taxonomy.json. Skips items already labelled
+    for the new tactics; safe to interrupt and re-run (upsert is idempotent).
+    """
+    from .config import TACTIC_CLASSES
+
+    OLD_TACTICS = {"SIO", "MIO", "CSIO"}
+    new_tactics = [t for t in TACTIC_CLASSES if t not in OLD_TACTICS]
+
+    if not new_tactics:
+        console.print("[yellow]No new tactics detected — nothing to backfill.[/]")
+        return
+
+    llm_pool = load_llm_pool()
+    if not llm_pool:
+        console.print(
+            "[red]No LLM coders configured.[/] "
+            "Check [bold]config/llm_pool.json[/] and ensure Ollama is running."
+        )
+        raise typer.Exit(code=1)
+
+    console.print(
+        f"Backfilling [bold]{len(new_tactics)}[/] new tactics "
+        f"({', '.join(new_tactics)}) "
+        f"× {len(llm_pool)} coders (limit {limit} items)…"
+    )
+    records = code_missing_tactics_from_db(llm_pool, new_tactics, limit=limit)
+    console.print(f"[green]{len(records)}[/] label(s) written.")
 
 
 @app.command("calibrate-coders")
