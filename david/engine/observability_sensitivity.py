@@ -12,6 +12,12 @@ For lambda in [0, lambda_max], recompute the posterior P(A=1 | data, lambda)
 and report the [min, max] interval across the lambda grid.
 
 lambda_max is elicited externally (default 0.25) and reviewed quarterly.
+
+Pre-registered Θ^meas grid
+--------------------------
+`theta_meas_grid()` returns the canonical sensitivity grid used by Theorem C
+(Sensitivity-envelope FDP, C-3). The grid parameters are fixed at
+pre-registration and must not be changed at runtime.
 """
 
 from __future__ import annotations
@@ -31,8 +37,22 @@ class LambdaBoundsResult:
     p_active_curve: list[float]
 
 
+# Pre-registered Θ^meas grid parameters — immutable at runtime.
+_THETA_MEAS_LAMBDA_MAX: float = 0.25
+_THETA_MEAS_N_STEPS: int = 6
+
+
 def lambda_grid(lambda_max: float = 0.25, n_steps: int = 6) -> np.ndarray:
     return np.linspace(0.0, lambda_max, n_steps)
+
+
+def theta_meas_grid() -> np.ndarray:
+    """Return the pre-registered Θ^meas sensitivity grid (lambda values).
+
+    This is the grid over which p_i^- = min_θ p_i^θ is computed in Theorem C
+    (Sensitivity-envelope FDP). Fixed at pre-registration; immutable at runtime.
+    """
+    return lambda_grid(_THETA_MEAS_LAMBDA_MAX, _THETA_MEAS_N_STEPS)
 
 
 def evaluate_cell(
