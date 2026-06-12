@@ -8,14 +8,18 @@ import { ExplainDot } from "@/components/explain-dot";
 ──────────────────────────────────────────────────────────────────────────── */
 
 export interface CurvePoint {
-  x: number;     // step index (e.g. horizon month)
-  mid: number;   // p(active) point estimate, 0..1
+  x: number;           // step index (e.g. horizon month)
+  mid: number;         // p(active) point estimate, 0..1
   lo80: number;
   hi80: number;
   lo95: number;
   hi95: number;
   belowHStar?: boolean; // Theorem D-forecast: false → horizon_prior_dominated
   horizonMonths?: number;
+  // E-2: stationary prior level for h > h* grey-out (from p_marginal / D-forecast)
+  piInfMid?: number;
+  piInfLo80?: number;
+  piInfHi80?: number;
 }
 
 interface Regime { bullish: number; bearish: number; volatile: number; stable: number }
@@ -50,6 +54,9 @@ export interface RouterDataProps {
   runId: string | null;
   /** Theorem D-forecast horizon-validity boundary h*(g) in months */
   hStar: number | null;
+  /** A-5: h* posterior spread — q05 and q95 in months (for the uncertainty band at the rule) */
+  hStarQ05: number | null;
+  hStarQ95: number | null;
   /** True when no live data was returned and mock fallbacks are shown */
   usingMock: boolean;
   updatedAgo: string;
@@ -153,28 +160,82 @@ const BASE_MODELS: ModelData[] = [
 
 const W = 480, H = 180, PAD = 8;
 
-function ForecastAreaChart({ curve, accent }: Readonly<{ curve: CurvePoint[]; accent: string }>) {
+/**
+ * E-2: FG5 mathematical grey-out.
+ *
+ * Renders conditional forecast in accent color for h ≤ h*, then switches to
+ * the desaturated π∞ posterior band for h > h*. The h* boundary is marked by
+ * a labeled amber vertical rule with the A-5 posterior spread
+ * (hStarQ05..hStarQ95) as a translucent x-axis span.
+ *
+ * The greyed region plots what the engine actually emits (the stored CI values,
+ * which converge to π∞ for h > h*) — never an extrapolated conditional line.
+ */
+function ForecastAreaChart({
+  curve,
+  accent,
+  hStarQ05,
+  hStarQ95,
+}: Readonly<{
+  curve: CurvePoint[];
+  accent: string;
+  hStarQ05?: number | null;
+  hStarQ95?: number | null;
+}>) {
   const lo = Math.min(...curve.map((p) => p.lo95));
   const hi = Math.max(...curve.map((p) => p.hi95));
   const dom = [Math.max(0, lo - 0.04), Math.min(1, hi + 0.04)];
 
-  // Scale x to fill the full width regardless of point count (4 horizons or 24 mock steps).
   const xmax = Math.max(1, curve.length - 1);
   const sx = (x: number) => PAD + (x / xmax) * (W - 2 * PAD);
   const sy = (v: number) => H - PAD - ((v - dom[0]) / (dom[1] - dom[0])) * (H - 2 * PAD);
 
-  // Theorem D-forecast: first index whose horizon exceeds h* → prior-dominated tail.
+  // FG5: split at the first point that is NOT below h*.
   const domIdx = curve.findIndex((p) => p.belowHStar === false);
   const hasPriorDom = domIdx > 0;
+  const condCurve  = hasPriorDom ? curve.slice(0, domIdx) : curve;
+  const priorCurve = hasPriorDom ? curve.slice(domIdx)    : [];
 
-  const band = (loKey: "lo80" | "lo95", hiKey: "hi80" | "hi95") => {
-    const top = curve.map((p) => `${sx(p.x)},${sy(p[hiKey])}`).join(" L ");
-    const bot = [...curve].reverse().map((p) => `${sx(p.x)},${sy(p[loKey])}`).join(" L ");
+  // h* boundary x-position.
+  const ruleX = hasPriorDom ? sx(domIdx) : null;
+
+  // A-5: x-positions for the h* posterior spread band.
+  // Attempt to map from months to x-index using horizonMonths fields.
+  const hMonths = curve.map((p) => p.horizonMonths ?? null);
+  const hStarSpreadLo = (hStarQ05 != null && hMonths.some((m) => m != null))
+    ? (() => {
+        // linear interpolation between the two nearest x positions
+        const idx = hMonths.findIndex((m) => m != null && m >= hStarQ05);
+        return idx >= 0 ? sx(curve[idx].x) : null;
+      })()
+    : null;
+  const hStarSpreadHi = (hStarQ95 != null && hMonths.some((m) => m != null))
+    ? (() => {
+        const idx = hMonths.findIndex((m) => m != null && m >= hStarQ95);
+        return idx >= 0 ? sx(curve[idx].x) : null;
+      })()
+    : null;
+
+  const bandPath = (
+    pts: CurvePoint[],
+    loKey: "lo80" | "lo95",
+    hiKey: "hi80" | "hi95",
+  ) => {
+    if (pts.length < 2) return "";
+    const top = pts.map((p) => `${sx(p.x)},${sy(p[hiKey])}`).join(" L ");
+    const bot = [...pts].reverse().map((p) => `${sx(p.x)},${sy(p[loKey])}`).join(" L ");
     return `M ${top} L ${bot} Z`;
   };
 
-  const midLine = curve.map((p, i) => `${i === 0 ? "M" : "L"} ${sx(p.x)} ${sy(p.mid)}`).join(" ");
+  const midPath = (pts: CurvePoint[]) =>
+    pts.map((p, i) => `${i === 0 ? "M" : "L"} ${sx(p.x)} ${sy(p.mid)}`).join(" ");
+
   const gid = "fglow-" + accent.replace("#", "");
+
+  // π∞ representative level: use the mean of the prior-dominated mid values.
+  const piInfMid = priorCurve.length > 0
+    ? priorCurve.reduce((s, p) => s + (p.piInfMid ?? p.mid), 0) / priorCurve.length
+    : null;
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="h-full w-full" preserveAspectRatio="none">
@@ -194,30 +255,84 @@ function ForecastAreaChart({ curve, accent }: Readonly<{ curve: CurvePoint[]; ac
 
       {/* gridlines */}
       {[0.25, 0.5, 0.75].map((g) => (
-        <line key={g} x1={PAD} x2={W - PAD} y1={sy(dom[0] + (dom[1] - dom[0]) * g)} y2={sy(dom[0] + (dom[1] - dom[0]) * g)}
+        <line key={g} x1={PAD} x2={W - PAD}
+          y1={sy(dom[0] + (dom[1] - dom[0]) * g)} y2={sy(dom[0] + (dom[1] - dom[0]) * g)}
           stroke="#1e293b" strokeWidth="1" strokeDasharray="3 4" />
       ))}
 
+      {/* ── Conditional forecast segment (h ≤ h*) — full accent color ─────── */}
       {/* 95% CI */}
-      <path d={band("lo95", "hi95")} fill={accent} fillOpacity="0.10" stroke={accent} strokeOpacity="0.18" strokeWidth="1" />
+      <path d={bandPath(condCurve, "lo95", "hi95")} fill={accent} fillOpacity="0.10"
+        stroke={accent} strokeOpacity="0.18" strokeWidth="1" />
       {/* 80% CI */}
-      <path d={band("lo80", "hi80")} fill={`url(#${gid}-fill)`} stroke={accent} strokeOpacity="0.4" strokeWidth="1" />
-      {/* median line, glowing */}
-      <path d={midLine} fill="none" stroke={accent} strokeWidth="2.5" filter={`url(#${gid})`} />
-      {/* leading dot */}
-      <circle cx={sx(curve.at(-1)!.x)} cy={sy(curve.at(-1)!.mid)} r="3.5" fill={accent} filter={`url(#${gid})`} />
+      <path d={bandPath(condCurve, "lo80", "hi80")} fill={`url(#${gid}-fill)`}
+        stroke={accent} strokeOpacity="0.4" strokeWidth="1" />
+      {/* median line with glow */}
+      {condCurve.length > 1 && (
+        <>
+          <path d={midPath(condCurve)} fill="none" stroke={accent} strokeWidth="2.5"
+            filter={`url(#${gid})`} />
+          <circle cx={sx(condCurve.at(-1)!.x)} cy={sy(condCurve.at(-1)!.mid)}
+            r="3.5" fill={accent} filter={`url(#${gid})`} />
+        </>
+      )}
 
-      {/* Theorem D-forecast: prior-dominated horizon tail (h > h*) is greyed + hatched */}
-      {hasPriorDom && (
+      {/* ── FG5 boundary: h* vertical rule + A-5 spread band ──────────────── */}
+      {hasPriorDom && ruleX != null && (
         <g>
-          <rect x={sx(domIdx)} y={PAD} width={W - PAD - sx(domIdx)} height={H - 2 * PAD}
-            fill="#0b1222" fillOpacity="0.62" />
-          <line x1={sx(domIdx)} y1={PAD} x2={sx(domIdx)} y2={H - PAD}
-            stroke="#fbbf24" strokeWidth="1.5" strokeDasharray="4 3" strokeOpacity="0.8" />
-          <text x={sx(domIdx) + 6} y={PAD + 14} fill="#fbbf24" fontSize="10" fontWeight="600">
-            h&gt;h* · prior-dominated
+          {/* A-5 posterior spread (hStarQ05..hStarQ95) — soft amber fill */}
+          {hStarSpreadLo != null && hStarSpreadHi != null && (
+            <rect
+              x={Math.min(hStarSpreadLo, hStarSpreadHi)}
+              y={PAD}
+              width={Math.abs(hStarSpreadHi - hStarSpreadLo)}
+              height={H - 2 * PAD}
+              fill="#f59e0b"
+              fillOpacity="0.07"
+            />
+          )}
+          {/* h* vertical rule */}
+          <line x1={ruleX} y1={PAD} x2={ruleX} y2={H - PAD}
+            stroke="#f59e0b" strokeWidth="1.5" strokeDasharray="5 3" strokeOpacity="0.9" />
+          <text x={ruleX + 5} y={PAD + 13} fill="#f59e0b" fontSize="10" fontWeight="600"
+            fontFamily="monospace">
+            h*
+          </text>
+          {/* π∞ level guide line */}
+          {piInfMid != null && (
+            <line
+              x1={ruleX} x2={W - PAD}
+              y1={sy(piInfMid)} y2={sy(piInfMid)}
+              stroke="#475569" strokeWidth="1" strokeDasharray="2 4"
+            />
+          )}
+        </g>
+      )}
+
+      {/* ── Prior-dominated segment (h > h*) — desaturated π∞ band ──────── */}
+      {priorCurve.length > 0 && (
+        <g opacity="0.65">
+          {/* 80% CI in grey */}
+          <path d={bandPath(priorCurve, "lo80", "hi80")}
+            fill="#475569" fillOpacity="0.22" stroke="#475569" strokeOpacity="0.35" strokeWidth="1" />
+          {/* 95% CI outline only */}
+          <path d={bandPath(priorCurve, "lo95", "hi95")}
+            fill="none" stroke="#334155" strokeOpacity="0.45" strokeWidth="1" strokeDasharray="2 3" />
+          {/* Label */}
+          <text
+            x={sx(priorCurve[0].x) + 6}
+            y={H - PAD - 6}
+            fill="#64748b" fontSize="9" fontFamily="monospace"
+          >
+            π∞ prior band
           </text>
         </g>
+      )}
+
+      {/* leading dot on the last conditional point */}
+      {condCurve.length === 0 && curve.length > 0 && (
+        <circle cx={sx(curve.at(-1)!.x)} cy={sy(curve.at(-1)!.mid)}
+          r="3.5" fill={accent} filter={`url(#${gid})`} />
       )}
     </svg>
   );
@@ -498,9 +613,12 @@ function theoremLockMsg(aPrime: string, bPrime: string): string {
   return "Teorema dështoi. Kontrollo statusin e portave.";
 }
 
-function ForecastChartCard({ model, explain, theoremFail, sbcFail, aPrime, bPrime, hStar }: Readonly<{
+function ForecastChartCard({
+  model, explain, theoremFail, sbcFail, aPrime, bPrime, hStar, hStarQ05, hStarQ95,
+}: Readonly<{
   model: ModelData; explain: boolean; theoremFail: boolean; sbcFail: boolean;
-  aPrime: string; bPrime: string; hStar: number | null;
+  aPrime: string; bPrime: string;
+  hStar: number | null; hStarQ05: number | null; hStarQ95: number | null;
 }>) {
   return (
     <div className="card-premium relative p-4 md:col-span-1 xl:col-span-2">
@@ -508,12 +626,24 @@ function ForecastChartCard({ model, explain, theoremFail, sbcFail, aPrime, bPrim
       <div className="mb-3 flex items-center justify-between">
         <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Forecast Probabilities</p>
         <div className="flex gap-3 text-[10px] text-slate-500">
-          <span className="flex items-center gap-1"><span className="inline-block h-2 w-3 rounded" style={{ background: model.accent, opacity: 0.5 }} /> 80% CI</span>
-          <span className="flex items-center gap-1"><span className="inline-block h-2 w-3 rounded" style={{ background: model.accent, opacity: 0.18 }} /> 95% CI</span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-2 w-3 rounded" style={{ background: model.accent, opacity: 0.5 }} /> 80% CI
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-2 w-3 rounded" style={{ background: model.accent, opacity: 0.18 }} /> 95% CI
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-2 w-3 rounded bg-slate-600 opacity-50" /> π∞
+          </span>
         </div>
       </div>
       <div className="relative h-44">
-        <ForecastAreaChart curve={model.curve} accent={model.accent} />
+        <ForecastAreaChart
+          curve={model.curve}
+          accent={model.accent}
+          hStarQ05={hStarQ05}
+          hStarQ95={hStarQ95}
+        />
         {theoremFail && !sbcFail && (
           <div className="absolute inset-0 z-30 flex items-center justify-center rounded-lg bg-[#020617]/90 backdrop-blur-sm">
             <div className="max-w-md px-4 text-center">
@@ -526,9 +656,12 @@ function ForecastChartCard({ model, explain, theoremFail, sbcFail, aPrime, bPrim
         )}
       </div>
       {hStar != null && model.id === ROUTER_ID && (
-        <p className="mt-2 text-[10px] text-slate-500">
-          Theorem D-forecast: h* = <span className="font-mono text-slate-300">{hStar} muaj</span>
-          {" "}· horizonet përtej h* shfaqen si <span className="text-amber-400">prior-dominated</span>.
+        <p className="mt-2 text-[10px] text-slate-500 font-mono">
+          D-forecast: h* = <span className="text-amber-400">{hStar} mo</span>
+          {hStarQ05 != null && hStarQ95 != null && (
+            <span className="text-slate-600"> [{hStarQ05}–{hStarQ95}]</span>
+          )}
+          {" "}· h &gt; h* → π∞ prior band
         </p>
       )}
     </div>
@@ -624,6 +757,8 @@ export function ForecastRouter(props: Readonly<RouterDataProps>) {
             aPrime={props.aPrime}
             bPrime={props.bPrime}
             hStar={props.hStar}
+            hStarQ05={props.hStarQ05}
+            hStarQ95={props.hStarQ95}
           />
           <RegimeCard model={model} explain={explain} />
           <RoutingCard model={model} explain={explain} aPrime={props.aPrime} bPrime={props.bPrime} />

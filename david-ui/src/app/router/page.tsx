@@ -57,6 +57,8 @@ export default async function ForecastRouterPage() {
   // Theorem gate status for the active stratum (from the fit summary).
   let aPrime = "skip", bPrime = "skip";
   let hStar: number | null = null;
+  let hStarQ05: number | null = null;
+  let hStarQ95: number | null = null;
   let cells: ForecastCell[] = [];
   let runId: string | null = null;
 
@@ -74,6 +76,10 @@ export default async function ForecastRouterPage() {
       bPrime = toStr(theorem("B_prime").gate_status);
       const hs = theorem("D_prime").h_star_months;
       if (typeof hs === "number") hStar = hs;
+      const hq05 = theorem("D_prime").h_star_q05;
+      const hq95 = theorem("D_prime").h_star_q95;
+      if (typeof hq05 === "number") hStarQ05 = hq05;
+      if (typeof hq95 === "number") hStarQ95 = hq95;
     }
     if (cellsRes.status === "fulfilled") {
       cells = cellsRes.value.forecast_cells ?? [];
@@ -108,6 +114,8 @@ export default async function ForecastRouterPage() {
         activeStratum={ACTIVE_STRATUM}
         runId={runId}
         hStar={hStar}
+        hStarQ05={hStarQ05}
+        hStarQ95={hStarQ95}
         usingMock={usingMock}
         updatedAgo={agoLabel(usedCells[0]?.emitted_at)}
       />
