@@ -180,6 +180,9 @@ def apply_forecast_routing(
 
     ledger = {
         "route_counts": route_counts,
+        # M: the claim-eligible family — cells that survived FG1–FG5 and are
+        # eligible for the Theorem C posterior expected FDP selection.
+        "m_claim_eligible": len(headline_cells),
         "posterior_fdp": fdp_summary,
         "n_cells_total": len(routed_cells),
         "cells": routed_cells,
