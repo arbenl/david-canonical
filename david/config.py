@@ -52,6 +52,7 @@ N_EFF_I2_FLOOR = 3.0                   # Theorem B'.2 N_eff × I² floor (weak-c
 POSTERIOR_FDP_DEFAULT_Q = 0.10      # Theorem C posterior expected FDP
 FDP_EXCEEDANCE_GAMMA = 0.15         # Theorem C FG6: FDP threshold for exceedance gate
 FDP_EXCEEDANCE_ALPHA = 0.05         # Theorem C FG6: maximum tolerated exceedance fraction
+FDP_MCSE_MARGIN_RATIO = 0.10        # Theorem C C-6: MCSE(p_i) must be < ratio × q; else cell excluded
 HORIZON_PRIOR_DRIFT_TAU = 0.50      # Theorem D-forecast horizon-validity threshold
 LAMBDA_ENDOG_INTERVAL_MAX_WIDTH = 0.20  # Gap-5 endogenous-observability sensitivity bound
 

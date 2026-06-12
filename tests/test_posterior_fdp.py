@@ -9,6 +9,7 @@ from david.theorems.C_renamed import (
     compute_posterior_fdp_threshold,
     compute_fdp_exceedance_gate,
     compute_posterior_fdp_envelope,
+    check_mcse_floor,
 )
 
 
@@ -320,3 +321,90 @@ def test_envelope_worst_theta_index():
     ])
     env = compute_posterior_fdp_envelope(p_grid, q=0.10)
     assert env.worst_theta_index == 1
+
+
+# ---------------------------------------------------------------------------
+# C-6: MCSE/ESS floor — check_mcse_floor unit tests
+# ---------------------------------------------------------------------------
+
+def test_mcse_floor_rejects_non_2d():
+    with pytest.raises(ValueError, match="2-D"):
+        check_mcse_floor(np.ones(100))
+
+
+def test_mcse_floor_rejects_too_few_draws():
+    with pytest.raises(ValueError, match="at least 4 draws"):
+        check_mcse_floor(np.ones((3, 2)))
+
+
+def test_mcse_floor_iid_high_ess_passes():
+    """iid Bernoulli draws give ESS ≈ n_draws → MCSE ≈ 0 → all cells pass."""
+    rng = np.random.default_rng(42)
+    # 2000 iid draws, p ≈ 0.9 per cell: std ≈ sqrt(0.09) ≈ 0.30; ESS ≈ 2000
+    # MCSE ≈ 0.30 / sqrt(2000) ≈ 0.0067; threshold = 0.10 * 0.10 = 0.01 → PASS
+    draws = rng.binomial(1, 0.9, size=(2000, 4)).astype(float)
+    result = check_mcse_floor(draws, q=0.10)
+    assert result.n_cells_excluded == 0
+    assert result.excluded_indices == []
+    assert result.mcse_threshold == pytest.approx(0.01)
+
+
+def test_mcse_floor_low_ess_excludes_cell():
+    """C-6 acceptance criterion: low-ESS draws ⇒ cell excluded with typed reason.
+
+    Construction:
+    - Cell 0: iid Bernoulli(0.9), 2000 draws → ESS ≈ 2000, MCSE ≈ 0.007 < 0.01 → PASS.
+    - Cell 1: highly autocorrelated — alternates blocks of 1s and 0s every 50 draws.
+      Effective ESS is << 2000; MCSE >> threshold.
+
+    The Geyer ESS estimator detects the strong positive autocorrelation and
+    returns a small effective sample size, causing MCSE(p_1) ≥ 0.01 = 0.10 × q.
+    Cell 1 must be in excluded_indices with binding_reason = "fdp_mcse_exceeds_gate_margin".
+    """
+    n = 2000
+    # Cell 0: iid high-p → passes
+    rng = np.random.default_rng(0)
+    col0 = rng.binomial(1, 0.9, size=n).astype(float)
+
+    # Cell 1: block-autocorrelated (50-draw blocks alternating 1 and 0)
+    # ESS ≈ n / block_size = 2000 / 50 = 40
+    # std ≈ 0.5 (p ≈ 0.5); MCSE ≈ 0.5 / sqrt(40) ≈ 0.079 >> 0.01 → FAIL
+    col1 = np.repeat(np.tile([1.0, 0.0], n // (2 * 50)), 50)[:n]
+
+    draws = np.column_stack([col0, col1])
+    result = check_mcse_floor(draws, q=0.10)
+
+    assert 1 in result.excluded_indices, (
+        f"Cell 1 (low ESS, high MCSE) must be excluded; got excluded={result.excluded_indices}, "
+        f"mcse={result.mcse}"
+    )
+    assert result.binding_reason == "fdp_mcse_exceeds_gate_margin"
+    assert result.n_cells_excluded >= 1
+    # Cell 0 (iid, high ESS) must not be excluded
+    assert 0 not in result.excluded_indices, (
+        f"Cell 0 (iid, good ESS) must pass; mcse[0]={result.mcse[0]:.6f}"
+    )
+
+
+def test_mcse_floor_all_identical_draws_pass():
+    """When all draws for a cell are identical (std = 0) MCSE = 0 → always passes."""
+    draws = np.ones((1000, 3))
+    result = check_mcse_floor(draws, q=0.10)
+    assert result.n_cells_excluded == 0
+
+
+def test_mcse_floor_threshold_scales_with_q():
+    """mcse_threshold = mcse_margin_ratio × q; stricter q → stricter threshold."""
+    rng = np.random.default_rng(7)
+    # iid Bernoulli(0.6), 200 draws: std ≈ 0.49, ESS ≈ 200, MCSE ≈ 0.035
+    draws = rng.binomial(1, 0.6, size=(200, 1)).astype(float)
+
+    # q=0.10 → threshold=0.01 → 0.035 >> 0.01 → cell excluded
+    res_strict = check_mcse_floor(draws, q=0.10)
+    # q=0.50 → threshold=0.05 → 0.035 < 0.05 → cell passes
+    res_loose = check_mcse_floor(draws, q=0.50)
+
+    assert res_strict.mcse_threshold == pytest.approx(0.01)
+    assert res_loose.mcse_threshold == pytest.approx(0.05)
+    # Cell should be excluded under strict q but pass under loose q
+    assert len(res_strict.excluded_indices) >= len(res_loose.excluded_indices)
