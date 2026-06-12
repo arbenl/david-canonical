@@ -15,7 +15,7 @@ from rich.console import Console
 
 from . import config
 from .engine import orchestrator
-from .engine.forecast import emit_forecasts
+from .engine.forecast import emit_forecasts, SbcFail
 from .engine.router import apply_forecast_routing
 from .ingest.adjudicator_queue import auto_adjudicate, build_queue
 from .ingest.llm_coder import (
@@ -215,7 +215,11 @@ def forecast(
     cell: str = typer.Option(None, help="optional cell filter c=...,p=...,k=..."),
 ) -> None:
     """Emit forecasts at horizon h. Pre-route; route applied by `david route`."""
-    result = emit_forecasts(horizon_months=horizon, cell_filter=cell)
+    try:
+        result = emit_forecasts(horizon_months=horizon, cell_filter=cell)
+    except SbcFail as exc:
+        console.print(f"[red]forecast FAIL_CLOSED (SBC)[/]: {exc}")
+        raise typer.Exit(code=2)
     if result.get("gate_status") != "pass":
         console.print(f"[red]forecast FAIL_CLOSED[/]: {result.get('reason')}")
         raise typer.Exit(code=2)
