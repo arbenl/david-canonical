@@ -16,13 +16,15 @@ the orchestrator that gathers inputs and dispatches.
 from __future__ import annotations
 
 import json
+import csv as csv_mod
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from ..config import FITS_DIR, FORECASTS_DIR
+from ..config import ADJUDICATED_DIR, FITS_DIR, FORECASTS_DIR
+from ..ingest.source_independence_ledger import load_ledger, s_eff
 from ..simulator.adversarial_battery import run_battery
 
 
@@ -201,8 +203,8 @@ def _assemble_inputs(fit_dir: Path, forecast_dir: Path | None) -> dict[str, dict
       fit_dir/draws.parquet            — full posterior draws
       forecast_dir/forecast_sbc*.json  — forecast SBC coverage (F14)
 
-    Returns a dict keyed by test id. Missing artifacts → empty dict for that
-    test → run_battery marks the test "skip" rather than "fail".
+    Returns a dict keyed by test id. Missing required-test artifacts are left
+    absent so run_battery fails closed instead of treating them as pass.
     """
     inputs: dict[str, dict] = {}
 
@@ -249,6 +251,12 @@ def _assemble_inputs(fit_dir: Path, forecast_dir: Path | None) -> dict[str, dict
             "historical_Y_rate_95th": b95,
         }
 
+    # ── F11: conditional source independence from adjudicated label artifacts ──
+    rows = _load_adjudicated_rows()
+    f11_inputs = _assemble_f11_inputs(rows)
+    if f11_inputs:
+        inputs["F11"] = f11_inputs
+
     # ── F13: horizon respect — need forecast cells and h_star from D' ─────────
     D_prime = fit_summary.get("theorems", {}).get("D_prime", {})
     if forecast_dir is not None and "h_star_months" in D_prime:
@@ -276,3 +284,147 @@ def _assemble_inputs(fit_dir: Path, forecast_dir: Path | None) -> dict[str, dict
             }
 
     return inputs
+
+
+def _load_adjudicated_rows(input_dir: Path | None = None) -> dict[str, list[dict[str, str]]]:
+    """Load adjudicated evidence/label rows for falsification tests.
+
+    Mirrors fit-data loading priority. Any failure returns empty row sets; the
+    required F11 gate then fails closed through run_battery.
+    """
+    try:
+        from ..db.repositories import get_adjudicated_data
+
+        return get_adjudicated_data()
+    except Exception:
+        pass
+
+    input_dir = input_dir or ADJUDICATED_DIR
+    required = ["evidence_items.csv", "sources.csv", "coder_labels.csv", "strata.csv"]
+    if any(not (input_dir / f).exists() for f in required):
+        return {"evidence_rows": [], "source_rows": [], "label_rows": [], "strata_rows": []}
+
+    def _read_csv(fname: str) -> list[dict[str, str]]:
+        with (input_dir / fname).open(newline="") as fh:
+            return [{k: (v or "").strip() for k, v in row.items()}
+                    for row in csv_mod.DictReader(fh)]
+
+    return {
+        "evidence_rows": _read_csv("evidence_items.csv"),
+        "source_rows": _read_csv("sources.csv"),
+        "label_rows": _read_csv("coder_labels.csv"),
+        "strata_rows": _read_csv("strata.csv"),
+    }
+
+
+def _assemble_f11_inputs(
+    rows: dict[str, list[dict[str, str]]],
+    min_pair_units: int = 4,
+) -> dict[str, Any]:
+    """Assemble F11 pairwise residual p-values from adjudicated labels.
+
+    Unit grain is (stratum, evidence_date, tactic). For each source within a
+    unit, coder labels are majority-voted to a source-level detection. Pairwise
+    Fisher exact tests then screen for residual dependence between source
+    detections across comparable units.
+    """
+    unit_source_binary, active_sources = _source_labels_by_unit(rows)
+    if len(active_sources) < 2:
+        return {}
+
+    sources = sorted(active_sources)
+    p_values = _pairwise_residual_p_values(
+        unit_source_binary,
+        sources,
+        min_pair_units=min_pair_units,
+    )
+
+    ledger = load_ledger()
+    structural_s_eff = s_eff(sources, ledger=ledger) if sources else None
+
+    return {
+        "pairwise_residual_p_values": p_values,
+        "structural_s_eff": structural_s_eff,
+        "structural_floor": 3.0,
+    }
+
+
+def _source_labels_by_unit(
+    rows: dict[str, list[dict[str, str]]],
+) -> tuple[dict[tuple[str, str, str], dict[str, int]], set[str]]:
+    evidence_rows = rows.get("evidence_rows", [])
+    label_rows = rows.get("label_rows", [])
+    if not evidence_rows or not label_rows:
+        return {}, set()
+
+    evidence_by_id = {r.get("evidence_id", ""): r for r in evidence_rows}
+    unit_source_labels: dict[tuple[str, str, str], dict[str, list[int]]] = {}
+    active_sources: set[str] = set()
+
+    for row in label_rows:
+        parsed = _parse_f11_label_row(row, evidence_by_id)
+        if parsed is None:
+            continue
+        unit, source_id, label = parsed
+        unit_source_labels.setdefault(unit, {}).setdefault(source_id, []).append(label)
+        active_sources.add(source_id)
+
+    unit_source_binary = {
+        unit: {
+            source_id: int(np.mean(labels) >= 0.5)
+            for source_id, labels in by_source.items()
+            if labels
+        }
+        for unit, by_source in unit_source_labels.items()
+    }
+    return unit_source_binary, active_sources
+
+
+def _parse_f11_label_row(
+    row: dict[str, str],
+    evidence_by_id: dict[str, dict[str, str]],
+) -> tuple[tuple[str, str, str], str, int] | None:
+    eid = row.get("evidence_id", "")
+    ev = evidence_by_id.get(eid)
+    if not ev:
+        return None
+    source_id = row.get("source_id") or ev.get("source_id", "")
+    tactic = row.get("tactic_k", "")
+    if not source_id or not tactic:
+        return None
+    try:
+        label = int(row.get("label", ""))
+    except ValueError:
+        return None
+    if label not in (0, 1):
+        return None
+    unit = (ev.get("stratum_g", ""), ev.get("evidence_date", ""), tactic)
+    return unit, source_id, label
+
+
+def _pairwise_residual_p_values(
+    unit_source_binary: dict[tuple[str, str, str], dict[str, int]],
+    sources: list[str],
+    *,
+    min_pair_units: int,
+) -> dict[tuple[str, str], float]:
+    p_values: dict[tuple[str, str], float] = {}
+    try:
+        from scipy.stats import fisher_exact
+    except Exception:
+        return p_values
+
+    for i, src_a in enumerate(sources):
+        for src_b in sources[i + 1:]:
+            table = np.zeros((2, 2), dtype=int)
+            n = 0
+            for by_source in unit_source_binary.values():
+                if src_a not in by_source or src_b not in by_source:
+                    continue
+                table[by_source[src_a], by_source[src_b]] += 1
+                n += 1
+            if n < min_pair_units:
+                continue
+            _odds, p = fisher_exact(table, alternative="two-sided")
+            p_values[(src_a, src_b)] = float(p)
+    return p_values

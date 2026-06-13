@@ -44,6 +44,7 @@ SOURCE_REGISTRY = CONFIG_ROOT / "source_registry.json"
 SOURCE_INDEPENDENCE_LEDGER = CONFIG_ROOT / "source_independence_ledger.json"
 DOMAIN_TAXONOMY_REGISTRY = CONFIG_ROOT / "domain_taxonomy.json"
 PRE_REGISTRATION = CONFIG_ROOT / "m01_preregistration_v3.json"
+PRIOR_PREDICTIVE_REFERENCE = CONFIG_ROOT / "prior_predictive_reference.json"
 
 # Theorem floors (pre-registered; reviewed quarterly)
 ID_DISTANCE_FLOOR = 0.05            # Theorem A' practical identifiability
@@ -54,11 +55,21 @@ FDP_EXCEEDANCE_GAMMA = 0.15         # Theorem C FG6: FDP threshold for exceedanc
 FDP_EXCEEDANCE_ALPHA = 0.05         # Theorem C FG6: maximum tolerated exceedance fraction
 FDP_MCSE_MARGIN_RATIO = 0.10        # Theorem C C-6: MCSE(p_i) must be < ratio × q; else cell excluded
 HORIZON_PRIOR_DRIFT_TAU = 0.50      # Theorem D-forecast horizon-validity threshold
+OBSERVABILITY_GRID = (0.0, 0.5, 1.0)  # Pre-registered grid for measurement-gate O sensitivity
+DWELL_LOG_LAMBDA_PRIOR_SD = 0.50    # Theorem D P6 sensitivity: lognormal dwell-rate prior SD
+KAPPA_CALIBRATION_MIN_MEAN = 0.55   # C5 tripwire: eject low/anti-correlated coders
 LAMBDA_ENDOG_INTERVAL_MAX_WIDTH = 0.20  # Gap-5 endogenous-observability sensitivity bound
 
 # SBC thresholds
 SBC_KS_ALPHA = 0.05
-SBC_BONFERRONI = True   # apply Bonferroni correction: effective α = SBC_KS_ALPHA / n_params
+SBC_BONFERRONI = True   # report Bonferroni-corrected KS diagnostics
+SBC_CHI2_BH_ALPHA = 0.05
+SBC_HISTOGRAM_EXCESS = 1.35
+SBC_R_HAT_MAX = 1.10
+SBC_BULK_ESS_MIN = 25
+SBC_DIVERGENCES_ALLOWED = 0
+SBC_MAX_DISCARD_FRACTION = 0.10
+SBC_RANK_DRAWS_TARGET = 100
 FORECAST_SBC_NOMINAL_80_BAND = (0.75, 0.85)
 FORECAST_SBC_NOMINAL_95_BAND = (0.90, 0.98)
 
@@ -103,7 +114,7 @@ LLM_POOL_REGISTRY = CONFIG_ROOT / "llm_pool.json"
 FORECAST_HORIZONS_MONTHS = (3, 6, 9, 12)
 
 # Model version (bump on Stan or theorem change)
-MODEL_VERSION = "m01_forward_v0.1.1"
+MODEL_VERSION = "m01_forward_v0.1.8"
 
 # Database
 DATABASE_URL = os.environ.get(

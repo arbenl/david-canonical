@@ -371,6 +371,35 @@ def test_build_stan_data_happy_path():
     assert len(data["Y_gold"]) == 3
     assert len(data["B_gold"]) == 3
     assert set(data["B_gold"]) <= {0, 1}
+    assert data["_n_un_ignored"] == 1
+    assert "E_un" not in data
+    assert "Y_un" not in data
+
+
+def test_build_stan_data_excludes_ungold_from_calibration_contract():
+    from david.ingest.llm_coder import _build_stan_data
+
+    gold = {"g1": 1, "g2": 0}
+    coded = [
+        {"evidence_id": "g1", "coder_id": "c1", "tactic_class": "t", "Y": 1},
+        {"evidence_id": "g1", "coder_id": "c2", "tactic_class": "t", "Y": 1},
+        {"evidence_id": "g2", "coder_id": "c1", "tactic_class": "t", "Y": 0},
+        {"evidence_id": "g2", "coder_id": "c2", "tactic_class": "t", "Y": 0},
+        # Strong un-gold consensus is counted for provenance only; it must not
+        # enter the Stan data used for kappa calibration.
+        {"evidence_id": "u1", "coder_id": "c1", "tactic_class": "t", "Y": 1},
+        {"evidence_id": "u1", "coder_id": "c2", "tactic_class": "t", "Y": 1},
+        {"evidence_id": "u2", "coder_id": "c1", "tactic_class": "t", "Y": 1},
+        {"evidence_id": "u2", "coder_id": "c2", "tactic_class": "t", "Y": 1},
+    ]
+
+    data = _build_stan_data(gold, coded)
+
+    assert data is not None
+    assert data["E_gold"] == 2
+    assert data["_n_un_ignored"] == 2
+    assert set(data) >= {"E_gold", "M", "Y_gold", "B_gold", "_coders"}
+    assert "Y_un" not in data
 
 
 def test_build_stan_data_insufficient_gold():
@@ -407,6 +436,27 @@ def test_calibrate_coders_missing_stan(tmp_path, monkeypatch):
     result = calibrate_coders()
     assert result["gate_status"] == "fail"
     assert "stan_missing" in result["reason"]
+
+
+def test_coder_calibration_tripwire_flags_low_kappa():
+    from david.config import KAPPA_CALIBRATION_MIN_MEAN
+    from david.ingest.llm_coder import _coder_calibration_tripwire_failures
+
+    failures = _coder_calibration_tripwire_failures(
+        ["good", "bad_plus", "bad_minus"],
+        [
+            {"mean": KAPPA_CALIBRATION_MIN_MEAN + 0.10},
+            {"mean": KAPPA_CALIBRATION_MIN_MEAN - 0.01},
+            {"mean": KAPPA_CALIBRATION_MIN_MEAN + 0.10},
+        ],
+        [
+            {"mean": KAPPA_CALIBRATION_MIN_MEAN + 0.10},
+            {"mean": KAPPA_CALIBRATION_MIN_MEAN + 0.10},
+            {"mean": KAPPA_CALIBRATION_MIN_MEAN - 0.01},
+        ],
+    )
+
+    assert [f["coder"] for f in failures] == ["bad_plus", "bad_minus"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -580,5 +630,3 @@ def test_adjudicate_evidence_endpoint(test_client, tmp_path, monkeypatch):
     assert csv_file.exists()
     content = csv_file.read_text().strip().splitlines()
     assert content[1] == "ev_test_123,1"
-
-

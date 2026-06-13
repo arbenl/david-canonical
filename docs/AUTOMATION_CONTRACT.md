@@ -16,14 +16,14 @@ What is automated and what requires a human.
 | Source ingestion | cron nightly | `david ingest` | Failed scraper is logged; pipeline continues with remaining sources. |
 | Normalization | post-ingest | `ingest/normalize.py` | Items with malformed schema are dropped to `data/raw/quarantine/`. |
 | LLM coding | post-normalize | `ingest/llm_coder.py` | Provider error logs to `data/coded/errors.jsonl`; item retried next cycle. |
-| Coder calibration | nightly | `coder_calibration.stan` | Gate-fail emits typed reason; no main fit runs. |
+| Coder calibration | nightly | `coder_calibration.stan` → `m01_forward.stan` | Gate-fail emits typed reason; no main fit runs; κ is calibrated from adjudicated gold labels only, un-gold consensus is excluded from κ until a dependence-aware calibration likelihood is audited, calibrated κ priors feed a common-mode coder-dependence likelihood in the main fit, and coders with κ̂ below 0.55 are rejected before fitting. |
 | Adjudicator queue rebuild | post-coding | `ingest/adjudicator_queue.py` | Queue capped by `ADJUDICATOR_HOURS_PER_CYCLE`. |
-| Fit | weekly | `model/fit.py` | R-hat / ESS / divergence fails block all downstream. |
-| Measurement SBC | weekly | `simulator/sbc.py` | KS uniformity fail blocks forecast emission. |
+| Fit | weekly | `model/fit.py` | R-hat / ESS / divergence fails block all downstream; A′/B′ source-channel gates reduce over the pre-registered observability grid, and D′ computes h* from the per-series terminal regime posterior and `z_future` path emitted by Stan. |
+| Measurement SBC | weekly | `simulator/sbc.py` | Non-converged synthetic worlds are discarded before thinned rank histograms; excessive discard fraction, rank-histogram chi-square/BH, or global chi-square fail blocks forecast emission; KS remains diagnostic. |
 | Forecast SBC | weekly | `simulator/forecast_sbc.py` | Coverage outside bands fails F14. |
-| Falsification F1..F15 | weekly | `validation/falsification.py` | Any failed F-test routes affected cells to withhold. |
-| Forecast emission | weekly | `engine/forecast.py` | Cells beyond h* are reported as horizon_prior_dominated. |
-| Routing | weekly | `engine/router.py` | All cells get a route; none are silently dropped. |
+| Falsification F1..F15 | weekly, after forecast emission | `validation/falsification.py` | Missing or failed required tests (F1, F11, F12, F13, F14) fail closed; conditional tests may skip only with a typed reason. |
+| Forecast emission | weekly | `engine/forecast.py` | Cells beyond h* are reported as horizon_prior_dominated; each cell carries the h* dwell-prior sensitivity block. |
+| Routing | weekly | `engine/router.py` | All cells get a route; missing or failed falsification ledger, missing FG2 source-independence evidence, missing FG3 evidence, or missing h* sensitivity evidence fails closed, and cells whose h* route changes under ±1 dwell-prior SD route to monitor_only. |
 
 ## Human-required (capped)
 
@@ -49,8 +49,8 @@ Three observable signals:
 1. `data/logs/nightly_ingest_*.log` exists for every weekday morning.
 2. `data/forecasts/{latest}/route_ledger.json` has `timestamp` within the
    last 7 days and `route_counts` sums to a non-zero total.
-3. `data/forecasts/{latest}/falsification_ledger.json` `battery_result.gate_status`
-   is recorded (pass OR fail; what matters is that it is recorded).
+3. `data/forecasts/{latest}/falsification_ledger.json` records
+   `battery_result.gate_status = "pass"`.
 
 If any of these is missing, the automation is silently broken; investigate
 before consuming forecast outputs.

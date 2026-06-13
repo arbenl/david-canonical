@@ -1,9 +1,8 @@
 # Deep Dive: Theorem A′ — Source-Channel Latent-Class Identifiability
 
 > [!TIP]
-> **Publication-Ready Deep-Dive PDF Available:** 
-> * **Compiled PDF Paper:** [theorem_1_deep_dive.pdf](file:///Users/arbenlila/development/david/canonical/docs/theorem_1_deep_dive.pdf) (compiled via Tectonic)
-> * **LaTeX Source:** [theorem_1_deep_dive.tex](file:///Users/arbenlila/development/david/canonical/docs/theorem_1_deep_dive.tex)
+> **Status:** Operational deep-dive synchronized to the June 2026 corrected theorem core.
+> The formal source of truth is `docs/thesis_mathematical_core.tex`.
 
 This document provides a detailed, step-by-step pedagogical explanation of **Theorem A′ (Source-Channel Latent-Class Identifiability)**. It is designed to help you thoroughly understand the math, the proof, how it behaves in practice, and why it is resilient to real-world challenges.
 
@@ -11,25 +10,25 @@ This document provides a detailed, step-by-step pedagogical explanation of **The
 
 ## 1. The Core Conceptual Problem
 
-Imagine you are tracking whether the Tobacco Industry (TI) is actively obstructing smoke-free policies in Kosovo. The active presence of this obstruction is a **latent variable**—it exists in reality, but it cannot be directly measured with $100\%$ certainty. We denote this true latent state as:
-* $A_g = 1$: Obstruction is active in stratum $g$ (Kosovo × smoke-free policy).
-* $A_g = 0$: Obstruction is inactive in stratum $g$.
+Imagine you are measuring a latent tactic-activity state for a stratum such as Kosovo × smoke-free policy. The state is not directly observed; it is inferred from gated evidence under explicit assumptions. We denote this latent measurement target as:
+* $A_g = 1$: tactic activity is present in stratum $g$.
+* $A_g = 0$: tactic activity is absent in stratum $g$.
 
 To observe this hidden state, you deploy **three noisy sources**:
 1. **Source 1 ($Y_1$):** A local news RSS scraper.
 2. **Source 2 ($Y_2$):** A legislative monitor api.
 3. **Source 3 ($Y_3$):** An LLM classifier analyzing scientific publication abstracts.
 
-Each source is imperfect. Sometimes they miss actual obstruction (false negatives), and sometimes they flag normal public relations as obstruction (false positives).
+Each source is imperfect. Sometimes it misses a latent positive state (false negatives), and sometimes it flags a latent negative state (false positives).
 
 ### The Circularity Paradox
 This presents a classic chicken-and-egg problem:
 * To know how **reliable** a source is, you need to know the **ground-truth** state ($A_g$).
 * To estimate the **ground-truth** state ($A_g$), you need to know the **reliability** of your sources.
 
-If you don't know either, can you ever estimate the true probability of obstruction $\phi_g = P(A_g=1)$ and the error rates of the sources at the same time? Or are there infinite different combinations of source error rates and activity probabilities that could explain the exact same data?
+If you don't know either, can you estimate the latent prevalence $\phi_g = P(A_g=1)$ and the source error rates at the same time? Or are there infinite different combinations of source error rates and activity probabilities that could explain the exact same population law?
 
-**Theorem A′ solves this paradox.** It mathematically guarantees that as long as you have **at least 3 independent sources**, there is **exactly one unique solution** to the problem. You can simultaneously recover the true prevalence of obstruction and the individual error rates of every source.
+**Theorem A′ resolves the core population identifiability problem under its assumptions.** With at least three effective independent source views, non-degenerate channels, interior prevalence, and replicated units, the population joint law identifies the latent prevalence and source-channel parameters up to the usual latent-class label swap. The production system removes that swap with the channel orientation convention $\rho_s > \delta_s$ and with external gold/adjudication anchors for substantive interpretation. This is a population theorem, not a finite-sample certification.
 
 ---
 
@@ -39,11 +38,11 @@ To understand the mathematical proof, let's first define each item in the model 
 
 | Parameter / Variable | Mathematical Meaning | Real-World Translation (Kosovo Example) |
 | :--- | :--- | :--- |
-| **$A_g \in \{0, 1\}$** | The latent (hidden) state. | Is there actual, hidden TI obstruction happening in Kosovo? (Yes = 1, No = 0) |
-| **$\phi_g \in [0, 1]$** | Prevalence parameter: $P(A_g = 1)$ | The true probability that the tobacco industry is actively obstructing the policy. |
+| **$A_g \in \{0, 1\}$** | The latent (hidden) measurement state. | Is the latent tactic-activity state positive in this stratum? |
+| **$\phi_g \in [0, 1]$** | Prevalence parameter: $P(A_g = 1)$ | The stratum-level probability of the latent positive state. |
 | **$Y_s \in \{0, 1\}$** | Observed output of Source $s$. | Did the RSS feed ($Y_1$), Parliamentary API ($Y_2$), or LLM ($Y_3$) flag an incident? |
-| **$\rho_s \in [0, 1]$** | Sensitivity: $P(Y_s = 1 \mid A_g = 1)$ | True Positive Rate: The probability that Source $s$ flags an incident when TI obstruction is *genuinely* occurring. |
-| **$\delta_s \in [0, 1]$** | False Positive Rate: $P(Y_s = 1 \mid A_g = 0)$ | Noise Rate: The probability that Source $s$ flags an incident even though the industry is *not* obstructing. |
+| **$\rho_s \in [0, 1]$** | Sensitivity: $P(Y_s = 1 \mid A_g = 1)$ | True Positive Rate: The probability that Source $s$ flags when the latent state is positive. |
+| **$\delta_s \in [0, 1]$** | False Positive Rate: $P(Y_s = 1 \mid A_g = 0)$ | Noise Rate: The probability that Source $s$ flags when the latent state is negative. |
 
 ---
 
@@ -106,9 +105,9 @@ Let's substitute our values:
 * The sum of our Kruskal ranks is: $2 + 2 + 2 = 6$.
 * The threshold we must meet is: $2(2) + 2 = 6$.
 
-Since **$6 \ge 6$**, the decomposition is **mathematically unique**. 
+Since **$6 \ge 6$**, the CP decomposition satisfies the Kruskal uniqueness condition.
 
-By the extension of this theorem to latent class analysis (**Allman-Matias-Rhodes, 2009**), this uniqueness guarantees that the parameters $(\phi, \{\rho_s, \dots\}, \dots)$ are uniquely identifiable up to a simple swap of the labels (which class we call "1" and which we call "0"). $\blacksquare$
+By the extension of this theorem to latent class analysis (**Allman-Matias-Rhodes, 2009**), the parameters $(\phi, \{\rho_s, \delta_s\})$ are identifiable from the population law up to a simple swap of the two latent labels. The probabilistic column-sum constraints remove arbitrary scaling; the production orientation $\rho_s > \delta_s$ chooses which class is the high-detection class. $\blacksquare$
 
 ---
 
@@ -138,7 +137,7 @@ How many parameters are you trying to find?
 * Source 3: $\rho_3, \delta_3$ (2 parameters)
 * **Total parameters = 7**
 
-You now have **7 equations and 7 unknowns**. The mathematical system is completely determined! 
+The dimension count now matches: 7 observed degrees of freedom for 7 scalar parameters. This is only an intuition for why three sources are the minimal plausible case. It is not the proof of uniqueness, and it does not remove the latent-class label swap. The actual uniqueness result comes from Kruskal's theorem plus the orientation convention described above.
 
 ---
 
@@ -149,10 +148,10 @@ In the real world, mathematical assumptions are challenged by noisy or biased en
 ### Challenge 1: The "Collusion" Attack (Conditional Dependence)
 * **The Threat:** What if Source 1 (RSS feed) and Source 2 (Legislative Monitor) are not independent? For instance, what if the legislative monitor simply copy-pastes news reports from the RSS feed?
 * **The Math Impact:** If the sources are dependent, the joint probability is no longer a simple product: $P(Y_1, Y_2 \mid A) \neq P(Y_1 \mid A)P(Y_2 \mid A)$. The tensor equation breaks down, and Kruskal's theorem no longer applies. The model will overestimate confidence and produce biased estimates.
-* **How DAVID defends:** The engine maintains a strictly reviewed **Source Independence Ledger** (`config/source_independence.json`). Pairwise independence weights are set manually based on structural audits (e.g., common ownership or shared feed APIs). If two sources are highly dependent, they are combined or penalized, and the adversarial check `F11` (conditional independence) triggers a gate failure if dependence is detected.
+* **How DAVID defends:** The engine maintains a strictly reviewed **Source Independence Ledger** (`config/source_independence_ledger.json`). Pairwise independence weights are set manually based on structural audits (e.g., common ownership or shared feed APIs). Missing or stale pair evidence, fewer than three effective independent source views, or structural $S_{\mathrm{eff}} < 3$ routes the affected cell to `evidence_gap`; the adversarial check `F11` (conditional independence) independently fails closed if residual dependence is detected.
 
 ### Challenge 2: The "Noise" Attack (Non-Informative Sources)
-* **The Threat:** What if Source 3 is completely useless (e.g., it flags everything randomly, meaning $\rho_3 \approx \delta_s$)?
+* **The Threat:** What if Source 3 is completely useless (e.g., it flags everything randomly, meaning $\rho_3 \approx \delta_3$)?
 * **The Math Impact:** If $\rho_3 = \delta_3$, the columns of $M^{(3)}$ are identical, making them linearly dependent. The Kruskal rank of $M^{(3)}$ collapses from 2 to 1.
   The sum of Kruskal ranks becomes:
   $$k(M^{(1)}) + k(M^{(2)}) + k(M^{(3)}) = 2 + 2 + 1 = 5$$
@@ -171,8 +170,8 @@ In the real world, mathematical assumptions are challenged by noisy or biased en
                      (Yes) │                   │ (No)
                            ▼                   ▼
                 ┌─────────────────────┐   ┌──────────────────────────────┐
-                │ Pass Gate FG2       │   │ Fail Gate FG2: Block stratum │
-                │ Route: Certified    │   │ Route: evidence_gap          │
+                │ Pass FG2 eligibility│   │ Fail Gate FG2: Block stratum │
+                │ Route remains gated │   │ Route: evidence_gap          │
                 └─────────────────────┘   └──────────────────────────────┘
 ```
 
@@ -181,6 +180,6 @@ In the real world, mathematical assumptions are challenged by noisy or biased en
   1. $A_g=1$ means "Obstruction is active" and $A_g=0$ means "Obstruction is inactive".
   2. $A_g=1$ means "Obstruction is inactive" and $A_g=0$ means "Obstruction is active".
   This is called the "label-switching" problem, where the model might flip the definition of 0 and 1.
-* **How DAVID defends:** We break this symmetry by applying an **order constraint** in both the generative model and the Stan model parameters:
-  * We enforce that the activity parameters in the first tactic class are ordered ascending: $\alpha_{\text{activity}}[:, 0]$ is sorted.
-  * This breaks the mathematical symmetry of the latent classes, anchoring State 1 and State 0 to their correct biological/operational definitions, ensuring the model never flips your predictions.
+* **How DAVID defends:** Two different label issues must not be conflated:
+  * The **regime-label** permutation across HSMM states is handled by the ordered first-tactic activity vector in the Stan model. This anchors regime labels for sampling and reporting.
+  * The **binary latent-class** swap inside Theorem A′ is resolved by the source-channel orientation convention $\rho_s > \delta_s$, implemented by the Stan link $\rho_s = \delta_s + (1-\delta_s)\operatorname{logit}^{-1}(j_s)$. This orients the high-detection class. Substantive interpretation still depends on external positive/negative anchors and gold adjudication; the ordering constraint alone does not supply that interpretation.

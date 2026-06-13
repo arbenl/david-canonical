@@ -67,6 +67,14 @@ def _make_fit_summary(tmp_path: Path, h_star: int = 3) -> Path:
             "D_prime": {
                 "theorem": "D_prime",
                 "h_star_months": h_star,
+                "h_star_prior_sensitivity": {
+                    "dwell_log_lambda_prior_sd": 0.5,
+                    "nominal_h_star": h_star,
+                    "minus_1sd_h_star": max(0, h_star - 3),
+                    "plus_1sd_h_star": h_star + 3,
+                    "route_change_horizons": [h_star + 3],
+                    "sensitivity_changes_route": True,
+                },
                 "gate_status": "pass" if h_star >= 3 else "fail",
             },
         },
@@ -168,14 +176,17 @@ def test_emit_forecasts_cell_has_required_router_fields(tmp_path: Path, monkeypa
     result = emit_forecasts(horizon_months=3, out_dir=out_dir, fit_dir=tmp_path)
     cells = json.loads(Path(result["cells_path"]).read_text())
     required = {
-        "p_active", "credible_interval_80", "credible_interval_95",
-        "horizon_validity", "identification_distance_posterior_median",
-        "informativeness_I_O_lower_95", "lambda_endogenous_bounds",
-        "model_version", "fit_run_id",
-    }
+                "p_active", "credible_interval_80", "credible_interval_95",
+                "horizon_validity", "identification_distance_posterior_median",
+                "informativeness_I_O_lower_95", "lambda_endogenous_bounds",
+                "horizon_prior_sensitivity", "source_independence",
+                "model_version", "fit_run_id",
+            }
     for cell in cells:
         missing = required - set(cell)
         assert not missing, f"cell missing fields: {missing}"
+        assert "prior_sensitivity" in cell["horizon_validity"]
+        assert cell["horizon_prior_sensitivity"]["horizon_months"] == 3
 
 
 def test_emit_forecasts_horizon_validity_flag(tmp_path: Path, monkeypatch):

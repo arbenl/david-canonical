@@ -250,7 +250,7 @@ export function FdpThresholdChart({
                   fontFamily: "monospace",
                 }}
               />
-              <Bar dataKey="p" isAnimationActive={false} radius={[2, 2, 0, 0]}>
+              <Bar dataKey="p" isAnimationActive={true} animationDuration={800} radius={[2, 2, 0, 0]}>
                 {barData.map((d) => (
                   <Cell
                     key={d.rank}
@@ -338,7 +338,8 @@ export function FdpThresholdChart({
                 stroke="#f59e0b"
                 strokeWidth={2}
                 dot={false}
-                isAnimationActive={false}
+                isAnimationActive={true}
+                animationDuration={1000}
                 type="monotone"
               />
               <Line

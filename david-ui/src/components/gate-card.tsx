@@ -1,5 +1,8 @@
+"use client";
+
 /**
  * E-4: Gate-stack panel (FG1–FG6).
+
  *
  * Exports:
  *   GateCard   — single gate card (existing; kept for backward compat).
@@ -18,6 +21,7 @@
  */
 
 import type { GateStatus } from "@/lib/api";
+import { motion, type Variants } from "framer-motion";
 
 // ── GateCard (unchanged public API) ───────────────────────────────────────────
 
@@ -177,6 +181,21 @@ const STATUS_BG: Record<GateStatus | "unknown", string> = {
   unknown: "border-slate-800 bg-slate-900/30",
 };
 
+const rungVariants: Variants = {
+  hidden: { opacity: 0, y: 10, filter: "blur(4px)" },
+  visible: {
+    opacity: 1,
+    y: 0,
+    filter: "blur(0px)",
+    transition: { type: "spring", bounce: 0, duration: 0.4 }
+  },
+};
+
+const connectorVariants: Variants = {
+  hidden: { opacity: 0, scaleY: 0, transformOrigin: "top" },
+  visible: { opacity: 1, scaleY: 1, transition: { duration: 0.2 } },
+};
+
 function statusKey(s: GateStatus | undefined): GateStatus | "unknown" {
   return s ?? "unknown";
 }
@@ -200,7 +219,7 @@ function Rung({ id, theorem, label, run, extra, isKnownFail }: Readonly<RungProp
   const isEffectiveFail = sk === "fail" && !isKnownFail;
 
   return (
-    <div className={`rounded-lg border px-3 py-2.5 ${STATUS_BG[sk]}`}>
+    <motion.div variants={rungVariants} className={`rounded-lg border px-3 py-2.5 ${STATUS_BG[sk]}`}>
       {/* Gate ID + label row */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
@@ -254,7 +273,7 @@ function Rung({ id, theorem, label, run, extra, isKnownFail }: Readonly<RungProp
       </div>
 
       {extra}
-    </div>
+    </motion.div>
   );
 }
 
@@ -271,7 +290,7 @@ function Fg6Rung({ fg6 }: Readonly<{ fg6: GateStackProps["fg6"] }>) {
   const sk = statusKey(overall);
 
   return (
-    <div className={`rounded-lg border px-3 py-2.5 ${STATUS_BG[sk]}`}>
+    <motion.div variants={rungVariants} className={`rounded-lg border px-3 py-2.5 ${STATUS_BG[sk]}`}>
       <div className="flex items-center justify-between gap-2 mb-2">
         <div className="flex items-center gap-2">
           <span className="shrink-0 rounded bg-slate-800 px-1.5 py-0.5 text-[9px] font-bold font-mono text-slate-400 uppercase tracking-wider">
@@ -326,7 +345,7 @@ function Fg6Rung({ fg6 }: Readonly<{ fg6: GateStackProps["fg6"] }>) {
       <div className={`mt-1.5 text-[9px] font-bold uppercase tracking-wider font-mono ${STATUS_TEXT[sk]}`}>
         {sk}
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -342,7 +361,7 @@ export function GateStack({ fg1, fg2, fg3, fg4, fg5, fg6 }: Readonly<GateStackPr
 
   const connColor = failed ? "bg-red-900/40" : "bg-emerald-900/30";
 
-  const connector = <div className={`mx-auto w-0.5 h-3 ${connColor}`} />;
+  const connector = <motion.div variants={connectorVariants} className={`mx-auto w-0.5 h-3 ${connColor}`} />;
 
   const fg3Combined: GateRunStatus = {
     status:
@@ -351,8 +370,24 @@ export function GateStack({ fg1, fg2, fg3, fg4, fg5, fg6 }: Readonly<GateStackPr
       fg3.iLower95.status === "pass" && fg3.nEffI2.status === "pass" ? "pass" : "skip",
   };
 
+  const containerVariants: Variants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.12,
+        delayChildren: 0.1,
+      },
+    },
+  };
+
   return (
-    <div className="space-y-0">
+    <motion.div
+      className="space-y-0"
+      initial="hidden"
+      animate="visible"
+      variants={containerVariants}
+    >
       {/* FG1 */}
       <Rung
         id="FG1"
@@ -377,7 +412,7 @@ export function GateStack({ fg1, fg2, fg3, fg4, fg5, fg6 }: Readonly<GateStackPr
       {connector}
 
       {/* FG3: two sub-gates shown as a single rung with split display */}
-      <div className={`rounded-lg border px-3 py-2.5 ${STATUS_BG[statusKey(fg3Combined.status)]}`}>
+      <motion.div variants={rungVariants} className={`rounded-lg border px-3 py-2.5 ${STATUS_BG[statusKey(fg3Combined.status)]}`}>
         <div className="flex items-center justify-between gap-2 mb-2">
           <div className="flex items-center gap-2">
             <span className="shrink-0 rounded bg-slate-800 px-1.5 py-0.5 text-[9px] font-bold font-mono text-slate-400 uppercase tracking-wider">FG3</span>
@@ -413,7 +448,7 @@ export function GateStack({ fg1, fg2, fg3, fg4, fg5, fg6 }: Readonly<GateStackPr
         <div className={`mt-1.5 text-[9px] font-bold uppercase tracking-wider font-mono ${STATUS_TEXT[statusKey(fg3Combined.status)]}`}>
           {statusKey(fg3Combined.status)}
         </div>
-      </div>
+      </motion.div>
       {connector}
 
       {/* FG4 */}
@@ -450,7 +485,7 @@ export function GateStack({ fg1, fg2, fg3, fg4, fg5, fg6 }: Readonly<GateStackPr
 
       {/* FG6 compound */}
       <Fg6Rung fg6={fg6} />
-    </div>
+    </motion.div>
   );
 }
 

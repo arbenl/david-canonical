@@ -208,6 +208,7 @@ def emit_forecasts(
     h_star: int = 0
     h_star_q05: int = 0
     h_star_q95: int = 0
+    h_star_prior_sensitivity: dict[str, Any] = {}
     fit_summary: dict = {}
     summary_path = fit_dir / "fit_summary.json"
     if summary_path.exists():
@@ -216,8 +217,17 @@ def emit_forecasts(
         h_star = d_prime.get("h_star_months", 0)
         h_star_q05 = d_prime.get("h_star_q05", 0)
         h_star_q95 = d_prime.get("h_star_q95", 0)
+        h_star_prior_sensitivity = d_prime.get("h_star_prior_sensitivity", {})
 
     below_h_star = horizon_months <= h_star
+    prior_sensitive_horizons = set(
+        h_star_prior_sensitivity.get("route_change_horizons", [])
+    )
+    h_star_prior_sensitivity_for_h = {
+        **h_star_prior_sensitivity,
+        "horizon_months": horizon_months,
+        "route_changes_at_horizon": horizon_months in prior_sensitive_horizons,
+    }
 
     # Build cell records for the requested horizon
     cells_records: list[dict[str, Any]] = []
@@ -264,11 +274,17 @@ def emit_forecasts(
                 "h_star_q05": h_star_q05,
                 "h_star_q95": h_star_q95,
                 "below_h_star": below_h_star,
+                "prior_sensitivity": h_star_prior_sensitivity_for_h,
                 "forecast_route": (
                     "conditional_forecast" if below_h_star
                     else "horizon_prior_dominated"
                 ),
             },
+            "horizon_prior_sensitivity": h_star_prior_sensitivity_for_h,
+            "source_independence": fit_summary.get(
+                "source_independence",
+                fit_summary.get("theorems", {}).get("A_prime", {}).get("source_independence"),
+            ),
             # Identification and informativeness from theorem gates (global level)
             "theorem_A_prime": fit_summary.get("theorems", {}).get("A_prime", {}),
             "theorem_B_prime": fit_summary.get("theorems", {}).get("B_prime", {}),

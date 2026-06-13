@@ -8,7 +8,8 @@
 //
 // Identity with council_m01:
 //   * same source-channel emission (rho, delta with observability)
-//   * same Dawid-Skene coder layer (kappa_plus, kappa_minus, ambiguity)
+//   * same Dawid-Skene coder layer (kappa_plus, kappa_minus) with
+//     common-mode document/coder-dependence mixture
 //   * same HSMM transition Pi with pi_ii = 0
 //   * same shifted-Poisson dwell h_i(d)
 //   * same right-censored final segment
@@ -20,6 +21,47 @@
 
 functions {
   #include functions/hsmm.stanfunctions
+
+  real bernoulli_log_prob(int y, real p) {
+    if (y == 1) return log(p);
+    return log1m(p);
+  }
+
+  real coder_block_log_prob(array[] int y, array[] int label_coder,
+                            int lb_start, int lb_len,
+                            vector kappa_plus, vector kappa_minus,
+                            vector coder_likelihood_weight,
+                            real coder_common_mode_weight,
+                            int b) {
+    real independent_lp = 0;
+    real common_p_sum = 0;
+    int all_same = 1;
+    int y0;
+
+    if (lb_len == 0) return 0;
+    y0 = y[lb_start];
+
+    for (idx in 1:lb_len) {
+      int n = lb_start + idx - 1;
+      int m_idx = label_coder[n];
+      real p_y1;
+      if (b == 1) {
+        p_y1 = kappa_plus[m_idx];
+      } else {
+        p_y1 = 1 - kappa_minus[m_idx];
+      }
+      independent_lp += coder_likelihood_weight[m_idx] * bernoulli_log_prob(y[n], p_y1);
+      common_p_sum += p_y1;
+      if (y[n] != y0) all_same = 0;
+    }
+
+    if (all_same == 1) {
+      real common_p = common_p_sum / lb_len;
+      real common_lp = bernoulli_log_prob(y0, common_p);
+      return log_mix(coder_common_mode_weight, common_lp, independent_lp);
+    }
+    return log1m(coder_common_mode_weight) + independent_lp;
+  }
 
   // Exact HSMM terminal regime posterior: P(Z_T = z | data, theta).
   // Replaces the HMM-approximation forward filter; accounts for dwell distribution.
@@ -74,6 +116,11 @@ data {
   // (0 if no labels for that unit-source pair); label_len[u,s] = count.
   array[U, S] int<lower=0> label_start;
   array[U, S] int<lower=0> label_len;
+  vector[M] kappa_plus_raw_prior_mean;
+  vector<lower=1e-3>[M] kappa_plus_raw_prior_sd;
+  vector[M] kappa_minus_raw_prior_mean;
+  vector<lower=1e-3>[M] kappa_minus_raw_prior_sd;
+  vector<lower=0, upper=1>[M] coder_likelihood_weight;
   real<lower=0, upper=1> delta_max;
 
   // NEW for forecast
@@ -97,6 +144,7 @@ parameters {
   vector[S] j_observability;
   vector[M] kappa_plus_raw;
   vector[M] kappa_minus_raw;
+  real<lower=0, upper=1> coder_common_mode_weight;
   vector[L] init_raw;
   matrix[L, L] jump_raw;
   vector<lower=0>[L] dwell_lambda;
@@ -153,14 +201,9 @@ model {
   j_raw ~ normal(0, 1);
   delta_observability ~ normal(0, 0.5);
   j_observability ~ normal(0, 0.5);
-  kappa_plus_raw ~ normal(1, 0.5);   // mean=1: kappa_plus ≈ 0.87 (accurate coders, high sensitivity).
-  kappa_minus_raw ~ normal(1, 0.5);  // Reverted: decreasing kappa INCREASES Y-rate when P(b=0)>P(b=1).
-  // item_ambiguity_raw / sigma_item_ambiguity / ambiguity_plus / ambiguity_minus removed:
-  // 185 parameters eliminated → 49 total. Per-item ambiguity caused Neal's funnel
-  // (sigma near 0) and was the dominant source of slow mixing (ESS ≈ 100 from 12k draws).
-  // None of these parameters appear in the theorem gates (A'/B'/C'/D'), so removing
-  // them does not affect gate validity. Model still estimates kappa_plus/minus per coder,
-  // rho/delta per source, and the full HSMM regime structure.
+  kappa_plus_raw ~ normal(kappa_plus_raw_prior_mean, kappa_plus_raw_prior_sd);
+  kappa_minus_raw ~ normal(kappa_minus_raw_prior_mean, kappa_minus_raw_prior_sd);
+  coder_common_mode_weight ~ beta(1, 9);
   init_raw ~ normal(0, 1);
   to_vector(jump_raw) ~ normal(0, 1);
   dwell_lambda ~ lognormal(log(6), 0.5);  // 3→6 months: tobacco interference regimes persist
@@ -194,23 +237,18 @@ model {
               real delta_us = delta_max * inv_logit(delta_raw[s] + delta_observability[s] * observability[u]);
               real j_us = inv_logit(j_raw[s] + j_observability[s] * observability[u]);
               real rho_us = delta_us + (1 - delta_us) * j_us;
-              real y_given_b1_lp = 0;
-              real y_given_b0_lp = 0;
-
-              {
-                int lb_start = label_start[u, s];
-                int lb_len   = label_len[u, s];
-                for (idx in 1:lb_len) {
-                  int n = lb_start + idx - 1;
-                  int m_idx = label_coder[n];
-                  y_given_b1_lp += bernoulli_logit_lpmf(
-                    y[n] | logit(kappa_plus[m_idx])
-                  );
-                  y_given_b0_lp += bernoulli_logit_lpmf(
-                    y[n] | logit(1 - kappa_minus[m_idx])
-                  );
-                }
-              }
+              int lb_start = label_start[u, s];
+              int lb_len   = label_len[u, s];
+              real y_given_b1_lp = coder_block_log_prob(
+                y, label_coder, lb_start, lb_len,
+                kappa_plus, kappa_minus, coder_likelihood_weight,
+                coder_common_mode_weight, 1
+              );
+              real y_given_b0_lp = coder_block_log_prob(
+                y, label_coder, lb_start, lb_len,
+                kappa_plus, kappa_minus, coder_likelihood_weight,
+                coder_common_mode_weight, 0
+              );
 
               active_lp += log_mix(rho_us, y_given_b1_lp, y_given_b0_lp);
               inactive_lp += log_mix(delta_us, y_given_b1_lp, y_given_b0_lp);
@@ -233,6 +271,7 @@ generated quantities {
   array[R, H_forecast] int<lower=1, upper=L> z_future;
   array[R, H_forecast, K] real<lower=0, upper=1> a_future;
   array[R, H_forecast, K] int<lower=0, upper=1> a_future_draw;
+  array[R] vector<lower=0, upper=1>[L] terminal_regime_posterior_draw;
 
   for (r in 1:R) {
     // 1) Build emit matrix for this series.
@@ -259,23 +298,18 @@ generated quantities {
               real delta_us = delta_max * inv_logit(delta_raw[s] + delta_observability[s] * observability[u]);
               real j_us = inv_logit(j_raw[s] + j_observability[s] * observability[u]);
               real rho_us = delta_us + (1 - delta_us) * j_us;
-              real y_given_b1_lp = 0;
-              real y_given_b0_lp = 0;
-
-              {
-                int lb_start = label_start[u, s];
-                int lb_len   = label_len[u, s];
-                for (idx in 1:lb_len) {
-                  int n = lb_start + idx - 1;
-                  int m_idx = label_coder[n];
-                  y_given_b1_lp += bernoulli_logit_lpmf(
-                    y[n] | logit(kappa_plus[m_idx])
-                  );
-                  y_given_b0_lp += bernoulli_logit_lpmf(
-                    y[n] | logit(1 - kappa_minus[m_idx])
-                  );
-                }
-              }
+              int lb_start = label_start[u, s];
+              int lb_len   = label_len[u, s];
+              real y_given_b1_lp = coder_block_log_prob(
+                y, label_coder, lb_start, lb_len,
+                kappa_plus, kappa_minus, coder_likelihood_weight,
+                coder_common_mode_weight, 1
+              );
+              real y_given_b0_lp = coder_block_log_prob(
+                y, label_coder, lb_start, lb_len,
+                kappa_plus, kappa_minus, coder_likelihood_weight,
+                coder_common_mode_weight, 0
+              );
 
               active_lp += log_mix(rho_us, y_given_b1_lp, y_given_b0_lp);
               inactive_lp += log_mix(delta_us, y_given_b1_lp, y_given_b0_lp);
@@ -288,6 +322,7 @@ generated quantities {
 
     // 2) Compute terminal regime posterior P(Z_T = z | data, theta).
     vector[L] z_T_post = terminal_regime_posterior(emit, log_init, log_jump, dwell_lambda);
+    terminal_regime_posterior_draw[r] = z_T_post;
 
     // 3) Sample terminal regime.
     int z_now = categorical_rng(z_T_post);

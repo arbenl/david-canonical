@@ -17,6 +17,7 @@
 //     j     = inv_logit(j_raw + j_observability * O)
 //     rho   = delta + (1 - delta) * j
 //   * kappa = 0.5 + 0.5 * inv_logit(N(1, 0.5))
+//   * coder_common_mode_weight ~ Beta(1, 9)
 //   * init via softmax of N(0,1)
 //
 // If you edit a prior in m01_forward.stan or synthetic_world.py, edit it here
@@ -52,6 +53,7 @@ generated quantities {
   vector[S] j_observability;
   vector[M] kappa_plus_raw;
   vector[M] kappa_minus_raw;
+  real coder_common_mode_weight;
   vector[L] init_raw;
   matrix[L, L] jump_raw;
   vector[L] dwell_lambda;
@@ -97,6 +99,7 @@ generated quantities {
     kappa_plus_raw[m] = normal_rng(1, 0.5);
     kappa_minus_raw[m] = normal_rng(1, 0.5);
   }
+  coder_common_mode_weight = beta_rng(1, 9);
   for (l in 1:L) init_raw[l] = normal_rng(0, 1);
   for (i in 1:L) {
     for (j in 1:L) jump_raw[i, j] = normal_rng(0, 1);

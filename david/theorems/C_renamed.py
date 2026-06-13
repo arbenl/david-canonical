@@ -80,6 +80,8 @@ class ExceedanceGateResult:
     m_star_expectation: int
     m_accepted: int
     exceedance_fraction_at_accepted: float
+    exceedance_ucl_at_accepted: float
+    exceedance_ess_at_accepted: float
     gamma: float
     alpha: float
     markov_fallback_used: bool
@@ -119,7 +121,8 @@ class McseFloorResult:
 
 
 def _bulk_ess_1d(chain: np.ndarray) -> float:
-    """Geyer initial positive-sequence bulk-ESS for a 1-D MCMC chain."""
+    """Geyer initial positive-sequence bulk-ESS for a single chain."""
+    chain = np.asarray(chain, dtype=float).reshape(-1)
     n = len(chain)
     if n < 4:
         return float(n)
@@ -142,6 +145,91 @@ def _bulk_ess_1d(chain: np.ndarray) -> float:
     return float(n) / max(s, 1.0)
 
 
+def _split_chain_matrix(draws: np.ndarray) -> np.ndarray:
+    """Return a chain matrix split by chain halves for ESS estimation.
+
+    Accepts either a single flattened chain ``(draws,)`` or explicit chains
+    ``(chains, draws)``.  A flattened chain is treated as one chain and split
+    into two half chains when possible; explicit chains become 2 * chains split
+    chains.  This preserves backwards compatibility for legacy 2-D draw files
+    while using the split-chain diagnostic whenever chain identity is present.
+    """
+    arr = np.asarray(draws, dtype=float)
+    if arr.ndim == 1:
+        arr = arr.reshape(1, -1)
+    if arr.ndim != 2:
+        raise ValueError("ESS input must be 1-D or 2-D")
+
+    n_chains, n_draws = arr.shape
+    if n_draws < 4:
+        return arr.reshape(n_chains, n_draws)
+
+    half = n_draws // 2
+    trimmed = arr[:, : 2 * half]
+    first = trimmed[:, :half]
+    second = trimmed[:, half:]
+    return np.concatenate([first, second], axis=0)
+
+
+def _bulk_ess_split_chains(draws: np.ndarray) -> float:
+    """Split-chain bulk-ESS using Geyer's initial positive sequence.
+
+    The implementation follows the same diagnostic intent as Stan/ArviZ:
+    estimate autocorrelation per split chain, average it across chains, and cap
+    the resulting ESS by the total retained post-warmup draws.  Degenerate
+    all-identical chains have zero Monte Carlo variance and receive full ESS.
+    """
+    chains = _split_chain_matrix(draws)
+    m, n = chains.shape
+    total = m * n
+    if total < 4:
+        return float(total)
+
+    chain_means = chains.mean(axis=1)
+    centered = chains - chain_means[:, None]
+    variances = np.var(chains, axis=1, ddof=1) if n > 1 else np.zeros(m)
+    W = float(np.mean(variances))
+    B = float(n * np.var(chain_means, ddof=1)) if m > 1 else 0.0
+    var_plus = ((n - 1.0) / n) * W + B / n
+    if var_plus <= 0.0 or not np.isfinite(var_plus):
+        return float(total)
+
+    max_lag = n - 1
+    rho_hat: list[float] = []
+    for lag in range(1, max_lag + 1):
+        acovs = []
+        for c in range(m):
+            x0 = centered[c, : n - lag]
+            x1 = centered[c, lag:]
+            acovs.append(float(np.dot(x0, x1) / n))
+        mean_acov = float(np.mean(acovs))
+        rho_hat.append(1.0 - (W - mean_acov) / var_plus)
+
+    tau = 1.0
+    k = 0
+    while k + 1 < len(rho_hat):
+        pair_sum = rho_hat[k] + rho_hat[k + 1]
+        if pair_sum < 0.0:
+            break
+        tau += 2.0 * pair_sum
+        k += 2
+
+    ess = float(total) / max(tau, 1.0)
+    return float(min(max(ess, 1.0), total))
+
+
+def _flatten_draws_preserving_chain_axis(joint_draws: np.ndarray) -> tuple[np.ndarray, int, int]:
+    """Normalize joint draws to flat rows plus chain/draw counts."""
+    arr = np.asarray(joint_draws)
+    if arr.ndim == 2:
+        n_draws, n_cells = arr.shape
+        return arr.reshape(n_draws, n_cells), 1, n_draws
+    if arr.ndim == 3:
+        n_chains, n_draws, n_cells = arr.shape
+        return arr.reshape(n_chains * n_draws, n_cells), n_chains, n_draws
+    raise ValueError("joint_draws must be 2-D or 3-D")
+
+
 def check_mcse_floor(
     joint_draws: np.ndarray,
     q: float = POSTERIOR_FDP_DEFAULT_Q,
@@ -160,7 +248,9 @@ def check_mcse_floor(
     Parameters
     ----------
     joint_draws:
-        Shape (n_draws, n_cells).  Column i is the draw sequence A_i^(s).
+        Shape (n_draws, n_cells) or (chains, draws, n_cells).  Column i is the
+        draw sequence A_i^(s).  The 3-D form preserves chain identity for
+        split-chain ESS; legacy 2-D inputs are split as a single chain.
     q:
         Target FDP level (same q used in the expectation gate).
     mcse_margin_ratio:
@@ -174,23 +264,26 @@ def check_mcse_floor(
     cells from the claim-eligible family before calling
     ``compute_posterior_fdp_threshold``.
     """
-    if joint_draws.ndim != 2:
-        raise ValueError("joint_draws must be 2-D: (n_draws, n_cells)")
-    n_draws, n_cells = joint_draws.shape
-    if n_draws < 4:
+    flat_draws, _, _ = _flatten_draws_preserving_chain_axis(joint_draws)
+    n_total_draws, n_cells = flat_draws.shape
+    if n_total_draws < 4:
         raise ValueError("joint_draws must contain at least 4 draws for ESS estimation")
 
     threshold = mcse_margin_ratio * q
-    draws = joint_draws.astype(float)
+    draws = np.asarray(joint_draws, dtype=float)
+    flat = flat_draws.astype(float)
 
     bulk_ess_vals: list[float] = []
     mcse_vals: list[float] = []
     excluded: list[int] = []
 
     for i in range(n_cells):
-        col = draws[:, i]
-        ess = _bulk_ess_1d(col)
-        std_i = float(np.std(col))
+        if draws.ndim == 3:
+            col_for_ess = draws[:, :, i]
+        else:
+            col_for_ess = draws[:, i]
+        ess = _bulk_ess_split_chains(col_for_ess)
+        std_i = float(np.std(flat[:, i]))
         mcse_i = std_i / max(np.sqrt(ess), 1.0)
         bulk_ess_vals.append(ess)
         mcse_vals.append(mcse_i)
@@ -259,11 +352,12 @@ def compute_fdp_exceedance_gate(
     Parameters
     ----------
     joint_draws:
-        Shape ``(n_draws, M)``.  Boolean/0-1 array where ``joint_draws[s, i]``
-        is the posterior draw A_i^(s), ordered identically to the sorted
-        marginals (i.e. column 0 = cell with the highest p_i, column M-1 =
-        lowest).  The caller is responsible for reordering columns to match
-        the descending-p_i sort used by ``compute_posterior_fdp_threshold``.
+        Shape ``(n_draws, M)`` or ``(chains, draws, M)``. Boolean/0-1 array
+        where ``joint_draws[..., i]`` is posterior draw A_i^(s), ordered
+        identically to the sorted marginals (i.e. column 0 = cell with the
+        highest p_i, column M-1 = lowest).  The caller is responsible for
+        reordering columns to match the descending-p_i sort used by
+        ``compute_posterior_fdp_threshold``.
     m_star:
         Maximum candidate prefix from the marginal expectation rule
         (= ``PosteriorFdpResult.n_flagged``).
@@ -284,10 +378,9 @@ def compute_fdp_exceedance_gate(
         ``.m_accepted`` is the shrunken prefix size (≤ m_star).  When no
         prefix passes the scan returns 0 (no claims).
     """
-    if joint_draws.ndim != 2:
-        raise ValueError("joint_draws must be 2-D: (n_draws, M)")
-    n_draws, M = joint_draws.shape
-    if n_draws == 0:
+    flat_draws, n_chains, n_draws_per_chain = _flatten_draws_preserving_chain_axis(joint_draws)
+    n_total_draws, M = flat_draws.shape
+    if n_total_draws == 0:
         raise ValueError("joint_draws must contain at least one draw")
     if m_star < 0:
         raise ValueError("m_star must be non-negative")
@@ -295,6 +388,8 @@ def compute_fdp_exceedance_gate(
         return ExceedanceGateResult(
             m_star_expectation=0, m_accepted=0,
             exceedance_fraction_at_accepted=0.0,
+            exceedance_ucl_at_accepted=0.0,
+            exceedance_ess_at_accepted=float(n_total_draws),
             gamma=gamma, alpha=alpha, markov_fallback_used=False,
         )
     if m_star > M:
@@ -306,10 +401,12 @@ def compute_fdp_exceedance_gate(
         return ExceedanceGateResult(
             m_star_expectation=m_star, m_accepted=m_star,
             exceedance_fraction_at_accepted=0.0,
+            exceedance_ucl_at_accepted=0.0,
+            exceedance_ess_at_accepted=float(n_total_draws),
             gamma=gamma, alpha=alpha, markov_fallback_used=True,
         )
 
-    draws = joint_draws.astype(float)
+    draws = flat_draws.astype(float)
 
     # Downward scan from m_star.
     # Exceedance is NOT monotone in m (adding a high-confidence TP dilutes the
@@ -318,11 +415,21 @@ def compute_fdp_exceedance_gate(
     # m whose empirical exceedance fraction is ≤ α.
     for m in range(m_star, 0, -1):
         fp_per_draw = (1.0 - draws[:, :m]).sum(axis=1) / m
-        exceedance_frac = float((fp_per_draw > gamma).mean())
-        if exceedance_frac <= alpha:
+        exceedance_ind = (fp_per_draw > gamma).astype(float)
+        exceedance_frac = float(exceedance_ind.mean())
+        if n_chains > 1:
+            exceedance_for_ess = exceedance_ind.reshape(n_chains, n_draws_per_chain)
+        else:
+            exceedance_for_ess = exceedance_ind
+        ess = _bulk_ess_split_chains(exceedance_for_ess)
+        se = np.sqrt(exceedance_frac * (1.0 - exceedance_frac) / max(ess, 1.0))
+        exceedance_ucl = float(exceedance_frac + 1.6448536269514722 * se)
+        if exceedance_ucl <= alpha:
             return ExceedanceGateResult(
                 m_star_expectation=m_star, m_accepted=m,
                 exceedance_fraction_at_accepted=exceedance_frac,
+                exceedance_ucl_at_accepted=exceedance_ucl,
+                exceedance_ess_at_accepted=ess,
                 gamma=gamma, alpha=alpha, markov_fallback_used=False,
             )
 
@@ -330,6 +437,8 @@ def compute_fdp_exceedance_gate(
     return ExceedanceGateResult(
         m_star_expectation=m_star, m_accepted=0,
         exceedance_fraction_at_accepted=0.0,
+        exceedance_ucl_at_accepted=0.0,
+        exceedance_ess_at_accepted=float(n_total_draws),
         gamma=gamma, alpha=alpha, markov_fallback_used=False,
     )
 def compute_posterior_fdp_envelope(

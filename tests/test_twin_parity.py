@@ -65,6 +65,7 @@ def py_draws() -> dict:
         "delta_raw": [], "j_raw": [],
         "delta_observability": [], "j_observability": [],
         "kappa_plus": [], "kappa_minus": [], "init": [],
+        "coder_common_mode_weight": [],
         "selection_alpha": [], "selection_observability": [],
         "selection_activity": [],
     }
@@ -143,6 +144,7 @@ def stan_draws() -> dict:
         "Pi", "alpha_activity", "dwell_lambda",
         "delta_raw", "j_raw", "delta_observability", "j_observability",
         "kappa_plus", "kappa_minus", "init",
+        "coder_common_mode_weight",
         "selection_alpha", "selection_observability", "selection_activity",
         "delta_link", "j_link", "rho_link",
         "dwell_draw", "a_draw",
@@ -176,6 +178,10 @@ def parity_table(py_draws, stan_draws) -> dict[str, tuple[np.ndarray, np.ndarray
     for m in range(M):
         table[f"kappa_plus[{m}]"] = (py["kappa_plus"][:, m], st["kappa_plus"][:, m])
         table[f"kappa_minus[{m}]"] = (py["kappa_minus"][:, m], st["kappa_minus"][:, m])
+    table["coder_common_mode_weight"] = (
+        py["coder_common_mode_weight"],
+        st["coder_common_mode_weight"],
+    )
     for name in ("selection_alpha", "selection_observability", "selection_activity"):
         table[name] = (py[name], st[name])
 
@@ -321,8 +327,9 @@ def test_parity_table_is_exhaustive(parity_table):
         "delta_raw": "delta_raw[", "j_raw": "j_raw[",
         "delta_observability": "delta_observability[",
         "j_observability": "j_observability[",
-        "kappa_plus": "kappa_plus[", "kappa_minus": "kappa_minus[",
-        "init": "init[",
+            "kappa_plus": "kappa_plus[", "kappa_minus": "kappa_minus[",
+            "coder_common_mode_weight": "coder_common_mode_weight",
+            "init": "init[",
         "selection_alpha": "selection_alpha",
         "selection_observability": "selection_observability",
         "selection_activity": "selection_activity",

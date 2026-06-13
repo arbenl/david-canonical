@@ -280,13 +280,14 @@ Output: posterior draws of (z_future, a_future) per (series, horizon, tactic).
 Stand-alone Dawid-Skene with gold-standard anchoring. Inputs:
 - coder_pool: M coders (R real + M_llm LLM-instances)
 - gold_items: subset with Gold_B
-- ungold_items: rest
 
 Outputs:
 - kappa_plus[m], kappa_minus[m] posteriors per coder
-- per-item latent B_e posterior
 
-Used by ingest layer before items flow into the main fit.
+Used by ingest layer before items flow into the main fit. κ posteriors are
+estimated from adjudicated gold labels only; un-gold coder consensus is counted
+for provenance but does not enter the calibration likelihood until a
+dependence-aware calibration model is audited.
 
 ### 4.3 `synthetic_generator.stan`
 
@@ -379,6 +380,11 @@ structural-independence pairwise scores. Each source has:
 
 The structural-independence ledger (`config/source_independence_ledger.json`)
 is reviewed quarterly. F11 (conditional independence) tests it.
+Missing active-source pair evidence is a typed FG2 evidence gap, not an
+assumption of independence. The fit path records the active source set and
+structural S_eff in the fit summary; router FG2 withholds headline eligibility
+when active sources are fewer than 3, reviewed pair evidence is absent, the
+ledger is stale, or structural S_eff falls below 3.
 
 ### 6.2 Scrapers
 

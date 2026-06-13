@@ -67,3 +67,19 @@ def test_horizon_zero_clamped_to_one(tiny_world):
     world, _ = tiny_world
     d = assemble_fit_data_from_synthetic(world, horizon=0)
     assert d["H_forecast"] == 1
+
+
+def test_synthetic_fit_data_carries_default_kappa_priors(tiny_world):
+    world, prior = tiny_world
+    d = assemble_fit_data_from_synthetic(world, horizon=prior.H)
+    assert d["kappa_plus_raw_prior_mean"] == [1.0] * prior.M
+    assert d["kappa_plus_raw_prior_sd"] == [0.5] * prior.M
+    assert d["kappa_minus_raw_prior_mean"] == [1.0] * prior.M
+    assert d["kappa_minus_raw_prior_sd"] == [0.5] * prior.M
+    assert d["coder_likelihood_weight"] == [1.0] * prior.M
+
+
+def test_synthetic_world_carries_common_mode_coder_dependence(tiny_world):
+    world, _ = tiny_world
+    w = world.theta["coder_common_mode_weight"]
+    assert 0.0 <= w <= 1.0
