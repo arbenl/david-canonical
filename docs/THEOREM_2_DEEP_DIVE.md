@@ -1,11 +1,10 @@
 # Deep Dive: Theorem B′ — Bayes Error \& Asymptotic Information Scaling
 
-This document provides a detailed, step-by-step pedagogical explanation of **Theorem B′ (Bayes Error and Asymptotic Information Scaling)**. It is designed to help you thoroughly understand the math, the proof, how it behaves in practice, and why it is resilient to real-world challenges.
-
 > [!TIP]
-> **Publication-Ready Deep-Dive PDF Available:** 
-> * **Compiled PDF Paper:** [theorem_2_deep_dive.pdf](file:///Users/arbenlila/development/david/canonical/docs/theorem_2_deep_dive.pdf) (compiled via Tectonic)
-> * **LaTeX Source:** [theorem_2_deep_dive.tex](file:///Users/arbenlila/development/david/canonical/docs/theorem_2_deep_dive.tex)
+> **Status:** Pedagogical deep-dive synchronized to the active theorem packet.
+> The formal source of truth is `docs/thesis_mathematical_core.tex`.
+
+This document provides a detailed, step-by-step pedagogical explanation of **Theorem B′ (Bayes Error and Asymptotic Information Scaling)**. It is designed to help you thoroughly understand the math, the proof, how it behaves in practice, and why it is resilient to real-world challenges.
 
 ---
 

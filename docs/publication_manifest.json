@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "latex_documents": [
+    {
+      "tex": "docs/thesis_mathematical_core.tex",
+      "pdf": "docs/thesis_mathematical_core.pdf",
+      "role": "formal_math_source"
+    },
+    {
+      "tex": "docs/unified_tensor_hsmm_framework.tex",
+      "pdf": "docs/unified_tensor_hsmm_framework.pdf",
+      "role": "formal_math_source"
+    }
+  ],
+  "markdown_documents": [
+    {
+      "path": "docs/ARCHITECTURE.md",
+      "role": "architecture_blueprint"
+    },
+    {
+      "path": "docs/AUDIT_REPORT_MATH_AI_2026-06-12.md",
+      "role": "audit_summary"
+    },
+    {
+      "path": "docs/AUTOMATION_CONTRACT.md",
+      "role": "operational_contract"
+    },
+    {
+      "path": "docs/CI_CD_REVIEW_GATES.md",
+      "role": "review_gate_summary"
+    },
+    {
+      "path": "docs/HUMAN_LOOP_BUDGET.md",
+      "role": "human_process"
+    },
+    {
+      "path": "docs/HUMAN_MATH_REVIEW_ESCALATION_2026-06-13.md",
+      "role": "escalation_ledger"
+    },
+    {
+      "path": "docs/KNOWN_GATES.md",
+      "role": "gate_index"
+    },
+    {
+      "path": "docs/M0.1_TRACKER.md",
+      "role": "tracker"
+    },
+    {
+      "path": "docs/MATHEMATICAL_THESIS_FRAMEWORK.md",
+      "role": "summary_of_latex_source",
+      "source_tex": "docs/thesis_mathematical_core.tex",
+      "source_pdf": "docs/thesis_mathematical_core.pdf"
+    },
+    {
+      "path": "docs/MILESTONE_1_REPORT.md",
+      "role": "implementation_report"
+    },
+    {
+      "path": "docs/SONNET_46_IMPLEMENTATION_PROMPT.md",
+      "role": "implementation_prompt"
+    },
+    {
+      "path": "docs/THEOREMS.md",
+      "role": "theorem_index",
+      "source_tex": "docs/thesis_mathematical_core.tex"
+    },
+    {
+      "path": "docs/THEOREM_1_DEEP_DIVE.md",
+      "role": "pedagogical_deep_dive",
+      "source_tex": "docs/thesis_mathematical_core.tex"
+    },
+    {
+      "path": "docs/THEOREM_2_DEEP_DIVE.md",
+      "role": "pedagogical_deep_dive",
+      "source_tex": "docs/thesis_mathematical_core.tex"
+    },
+    {
+      "path": "docs/THESIS_MATHEMATICAL_BASIS.md",
+      "role": "implementation_index",
+      "source_tex": "docs/thesis_mathematical_core.tex"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-06-09-local-ollama-gemma-integration.md",
+      "role": "planning_artifact"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-06-09-local-ollama-gemma-integration-design.md",
+      "role": "planning_artifact"
+    }
+  ]
+}

@@ -71,6 +71,9 @@ jobs:
               print(f"validated {path}")
           PY
 
+      - name: Validate docs publication rule
+        run: uv run python scripts/check_docs_publication_rule.py
+
       - name: Run pytest suite
         run: uv run pytest tests -q
 
@@ -136,4 +139,3 @@ jobs:
           introduced lint/type regressions; compare these logs against the base
           branch and fix new findings before requesting Copilot/Sonar review.
           MD
-
