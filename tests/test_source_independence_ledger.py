@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from david.ingest.source_independence_ledger import (
     load_ledger,
     missing_pair_keys,
@@ -14,7 +16,7 @@ def test_canonical_source_independence_ledger_loads_reviewed_pairs():
 
     assert ledger["reviewed_on"] == "2026-06-09"
     assert "balkan_insight_rss::who_news_rss" in ledger["pairs"]
-    assert ledger["pairs"]["balkan_insight_rss::who_news_rss"]["independence_score"] == 0.95
+    assert ledger["pairs"]["balkan_insight_rss::who_news_rss"]["independence_score"] == pytest.approx(0.95)
 
 
 def test_structural_summary_fails_closed_on_missing_pair():
@@ -48,7 +50,7 @@ def test_structural_summary_passes_with_complete_above_floor_ledger():
     summary = structural_independence_summary(["s1", "s2", "s3"], ledger=ledger)
 
     assert summary["gate_status"] == "pass"
-    assert summary["structural_s_eff"] == 3.0
+    assert summary["structural_s_eff"] == pytest.approx(3.0)
     assert summary["missing_pair_keys"] == []
 
 

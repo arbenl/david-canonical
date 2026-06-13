@@ -49,10 +49,7 @@ def test_expectation_gate_api_accepts_only_marginals():
     assert sig.parameters["p_hat"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
     assert sig.parameters["q"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
 
-    p = np.array([0.95, 0.90, 0.40])
-    joint_draws = np.ones((100, 3), dtype=np.int32)
-    with pytest.raises(TypeError):
-        compute_posterior_fdp_threshold(p, joint_draws=joint_draws)  # type: ignore[call-arg]
+    assert "joint_draws" not in sig.parameters
 
 
 # ---------------------------------------------------------------------------

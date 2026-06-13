@@ -53,18 +53,18 @@ class HorizonValidity:
     horizon_validity_curve_q95: list[tuple[int, float]]
 
 
-def stationary_marginal_embedded(Pi_off_diag: np.ndarray) -> np.ndarray:
+def stationary_marginal_embedded(pi_off_diag: np.ndarray) -> np.ndarray:
     """Stationary distribution of the embedded segment chain.
 
-    Pi_off_diag has zero diagonal and rows summing to 1.
+    pi_off_diag has zero diagonal and rows summing to 1.
     Returns the unique left eigenvector with eigenvalue 1, normalized.
     """
-    R = Pi_off_diag.shape[0]
-    if Pi_off_diag.shape != (R, R):
+    R = pi_off_diag.shape[0]
+    if pi_off_diag.shape != (R, R):
         raise ValueError("Pi must be square")
-    if not np.allclose(np.diag(Pi_off_diag), 0.0, atol=1e-10):
+    if not np.allclose(np.diag(pi_off_diag), 0.0, atol=1e-10):
         raise ValueError("Pi diagonal must be zero (no self-transitions)")
-    eigvals, eigvecs = np.linalg.eig(Pi_off_diag.T)
+    eigvals, eigvecs = np.linalg.eig(pi_off_diag.T)
     idx = int(np.argmin(np.abs(eigvals - 1.0)))
     vec = np.real(eigvecs[:, idx])
     vec = np.abs(vec)
@@ -72,20 +72,20 @@ def stationary_marginal_embedded(Pi_off_diag: np.ndarray) -> np.ndarray:
 
 
 def stationary_marginal_time(
-    Pi_off_diag: np.ndarray,
+    pi_off_diag: np.ndarray,
     dwell_mean: np.ndarray,
 ) -> np.ndarray:
     """Time-weighted stationary marginal pi_inf for the HSMM.
 
     pi_inf[r] = nu[r] * mu[r] / sum_j nu[j] * mu[j]
     """
-    nu = stationary_marginal_embedded(Pi_off_diag)
+    nu = stationary_marginal_embedded(pi_off_diag)
     weighted = nu * dwell_mean
     return weighted / weighted.sum()
 
 
 def forecast_regime_distribution(
-    Pi_off_diag: np.ndarray,
+    pi_off_diag: np.ndarray,
     dwell_mean: np.ndarray,
     z_t: int,
     horizon: int,
@@ -96,9 +96,9 @@ def forecast_regime_distribution(
 
     Returns shape (R,) probability vector.
     """
-    R = Pi_off_diag.shape[0]
+    R = pi_off_diag.shape[0]
     counts = np.zeros(R)
-    rng = rng or np.random.default_rng()
+    rng = rng or np.random.default_rng(0)
     for _ in range(n_mc):
         z = z_t
         dwell_remaining = _stationary_residual_dwell(rng, float(dwell_mean[z]))
@@ -106,7 +106,7 @@ def forecast_regime_distribution(
             if dwell_remaining > 1:
                 dwell_remaining -= 1
                 continue
-            row = Pi_off_diag[z].copy()
+            row = pi_off_diag[z].copy()
             row = row / row.sum()
             z = int(rng.choice(R, p=row))
             dwell_remaining = _shifted_poisson_dwell_from_mean(rng, float(dwell_mean[z]))
@@ -213,7 +213,7 @@ def _drift_share(forecast: np.ndarray, pi_inf: np.ndarray, z_present: np.ndarray
 
 def horizon_validity_from_z_future_draws(
     cell_id: str,
-    Pi_off_diag_draws: np.ndarray,
+    pi_off_diag_draws: np.ndarray,
     dwell_mean_draws: np.ndarray,
     z_t_distribution: np.ndarray,
     z_future_draws: np.ndarray,
@@ -228,18 +228,18 @@ def horizon_validity_from_z_future_draws(
     shape (posterior_draws, H). Values may be Stan's 1-indexed regimes or
     Python's 0-indexed regimes.
     """
-    if Pi_off_diag_draws.ndim == 2:
-        Pi_off_diag_draws = Pi_off_diag_draws[np.newaxis, :, :]
+    if pi_off_diag_draws.ndim == 2:
+        pi_off_diag_draws = pi_off_diag_draws[np.newaxis, :, :]
         dwell_mean_draws = dwell_mean_draws[np.newaxis, :]
 
-    n_draws, n_regimes, _ = Pi_off_diag_draws.shape
+    n_draws, n_regimes, _ = pi_off_diag_draws.shape
     if dwell_mean_draws.shape != (n_draws, n_regimes):
         raise ValueError("dwell_mean_draws must have shape (draws, regimes)")
     z_t_draws = _coerce_terminal_distribution(z_t_distribution, n_draws, n_regimes)
     z_future = _coerce_z_future_draws(z_future_draws, n_draws, n_regimes, h_max)
 
     pi_inf_draws = np.array([
-        stationary_marginal_time(Pi_off_diag_draws[i], dwell_mean_draws[i])
+        stationary_marginal_time(pi_off_diag_draws[i], dwell_mean_draws[i])
         for i in range(n_draws)
     ])
 
@@ -288,7 +288,7 @@ def horizon_validity_from_z_future_draws(
 
 def horizon_validity(
     cell_id: str,
-    Pi_off_diag_draws: np.ndarray,
+    pi_off_diag_draws: np.ndarray,
     dwell_mean_draws: np.ndarray,
     z_t_distribution: np.ndarray,    # posterior of Z_T at present: (R,) or (D, R)
     h_max: int = 18,
@@ -298,21 +298,21 @@ def horizon_validity(
 ) -> HorizonValidity:
     """Horizon diagnostic h* as the first crossing of the drift threshold."""
     # Support single point-estimates for testing
-    if Pi_off_diag_draws.ndim == 2:
-        Pi_off_diag_draws = Pi_off_diag_draws[np.newaxis, :, :]
+    if pi_off_diag_draws.ndim == 2:
+        pi_off_diag_draws = pi_off_diag_draws[np.newaxis, :, :]
         dwell_mean_draws = dwell_mean_draws[np.newaxis, :]
 
-    N_draws, R, _ = Pi_off_diag_draws.shape
+    N_draws, R, _ = pi_off_diag_draws.shape
     z_t_draws = _coerce_terminal_distribution(z_t_distribution, N_draws, R)
 
     rng = np.random.default_rng(seed)
     curves_per_draw = []
 
     for i in range(N_draws):
-        Pi_off_diag = Pi_off_diag_draws[i]
+        pi_off_diag = pi_off_diag_draws[i]
         dwell_mean = dwell_mean_draws[i]
         z_dist = z_t_draws[i]
-        pi_inf = stationary_marginal_time(Pi_off_diag, dwell_mean)
+        pi_inf = stationary_marginal_time(pi_off_diag, dwell_mean)
 
         curve = []
         for h in range(1, h_max + 1):
@@ -322,7 +322,7 @@ def horizon_validity(
                 if p < 1e-9:
                     continue
                 forecast += p * forecast_regime_distribution(
-                    Pi_off_diag, dwell_mean, z_t=z, horizon=h, n_mc=n_mc, rng=rng
+                    pi_off_diag, dwell_mean, z_t=z, horizon=h, n_mc=n_mc, rng=rng
                 )
             forecast = forecast / forecast.sum()
             # drift share: KL(forecast || pi_inf) decreases as forecast nears

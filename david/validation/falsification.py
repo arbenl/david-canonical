@@ -328,51 +328,91 @@ def _assemble_f11_inputs(
     Fisher exact tests then screen for residual dependence between source
     detections across comparable units.
     """
+    unit_source_binary, active_sources = _source_labels_by_unit(rows)
+    if len(active_sources) < 2:
+        return {}
+
+    sources = sorted(active_sources)
+    p_values = _pairwise_residual_p_values(
+        unit_source_binary,
+        sources,
+        min_pair_units=min_pair_units,
+    )
+
+    ledger = load_ledger()
+    structural_s_eff = s_eff(sources, ledger=ledger) if sources else None
+
+    return {
+        "pairwise_residual_p_values": p_values,
+        "structural_s_eff": structural_s_eff,
+        "structural_floor": 3.0,
+    }
+
+
+def _source_labels_by_unit(
+    rows: dict[str, list[dict[str, str]]],
+) -> tuple[dict[tuple[str, str, str], dict[str, int]], set[str]]:
     evidence_rows = rows.get("evidence_rows", [])
     label_rows = rows.get("label_rows", [])
     if not evidence_rows or not label_rows:
-        return {}
+        return {}, set()
 
     evidence_by_id = {r.get("evidence_id", ""): r for r in evidence_rows}
     unit_source_labels: dict[tuple[str, str, str], dict[str, list[int]]] = {}
     active_sources: set[str] = set()
 
     for row in label_rows:
-        eid = row.get("evidence_id", "")
-        ev = evidence_by_id.get(eid)
-        if not ev:
+        parsed = _parse_f11_label_row(row, evidence_by_id)
+        if parsed is None:
             continue
-        source_id = row.get("source_id") or ev.get("source_id", "")
-        tactic = row.get("tactic_k", "")
-        if not source_id or not tactic:
-            continue
-        try:
-            label = int(row.get("label", ""))
-        except ValueError:
-            continue
-        if label not in (0, 1):
-            continue
-        unit = (ev.get("stratum_g", ""), ev.get("evidence_date", ""), tactic)
+        unit, source_id, label = parsed
         unit_source_labels.setdefault(unit, {}).setdefault(source_id, []).append(label)
         active_sources.add(source_id)
 
-    if len(active_sources) < 2:
-        return {}
-
-    unit_source_binary: dict[tuple[str, str, str], dict[str, int]] = {}
-    for unit, by_source in unit_source_labels.items():
-        unit_source_binary[unit] = {
-            src: int(np.mean(labels) >= 0.5)
-            for src, labels in by_source.items()
+    unit_source_binary = {
+        unit: {
+            source_id: int(np.mean(labels) >= 0.5)
+            for source_id, labels in by_source.items()
             if labels
         }
+        for unit, by_source in unit_source_labels.items()
+    }
+    return unit_source_binary, active_sources
 
+
+def _parse_f11_label_row(
+    row: dict[str, str],
+    evidence_by_id: dict[str, dict[str, str]],
+) -> tuple[tuple[str, str, str], str, int] | None:
+    eid = row.get("evidence_id", "")
+    ev = evidence_by_id.get(eid)
+    if not ev:
+        return None
+    source_id = row.get("source_id") or ev.get("source_id", "")
+    tactic = row.get("tactic_k", "")
+    if not source_id or not tactic:
+        return None
+    try:
+        label = int(row.get("label", ""))
+    except ValueError:
+        return None
+    if label not in (0, 1):
+        return None
+    unit = (ev.get("stratum_g", ""), ev.get("evidence_date", ""), tactic)
+    return unit, source_id, label
+
+
+def _pairwise_residual_p_values(
+    unit_source_binary: dict[tuple[str, str, str], dict[str, int]],
+    sources: list[str],
+    *,
+    min_pair_units: int,
+) -> dict[tuple[str, str], float]:
     p_values: dict[tuple[str, str], float] = {}
-    sources = sorted(active_sources)
     try:
         from scipy.stats import fisher_exact
     except Exception:
-        fisher_exact = None
+        return p_values
 
     for i, src_a in enumerate(sources):
         for src_b in sources[i + 1:]:
@@ -385,16 +425,6 @@ def _assemble_f11_inputs(
                 n += 1
             if n < min_pair_units:
                 continue
-            if fisher_exact is None:
-                continue
             _odds, p = fisher_exact(table, alternative="two-sided")
             p_values[(src_a, src_b)] = float(p)
-
-    ledger = load_ledger()
-    structural_s_eff = s_eff(sources, ledger=ledger) if sources else None
-
-    return {
-        "pairwise_residual_p_values": p_values,
-        "structural_s_eff": structural_s_eff,
-        "structural_floor": 3.0,
-    }
+    return p_values

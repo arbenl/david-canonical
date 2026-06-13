@@ -231,7 +231,7 @@ export function TrajectoryChart({
       {priorCurve.length > 0 && (
         <motion.g
           initial={{ opacity: 0 }}
-          animate={{ opacity: 0.60 }}
+          animate={{ opacity: 0.6 }}
           transition={{ duration: 0.6, delay: 1.2 }}
         >
           <path d={bandPath(priorCurve, "lo80", "hi80")}

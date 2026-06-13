@@ -211,12 +211,12 @@ def apply_forecast_routing(
 
             # FG3 informativeness
             if route == "headline":
-                I_lower95 = _finite_float(cell.get("informativeness_I_O_lower_95"))
+                i_lower95 = _finite_float(cell.get("informativeness_I_O_lower_95"))
                 n_eff_i2 = _finite_float(cell.get("informativeness_n_eff_i2"))
-                if I_lower95 is None:
+                if i_lower95 is None:
                     route = "prior_dominated"
                     reasons.append("FG3_I_O_lower95_missing")
-                elif I_lower95 < INFORMATIVENESS_FLOOR_LOWER_95:
+                elif i_lower95 < INFORMATIVENESS_FLOOR_LOWER_95:
                     route = "prior_dominated"
                     reasons.append("FG3_I_O_lower95_below_floor")
                 elif n_eff_i2 is None:

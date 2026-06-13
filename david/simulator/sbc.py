@@ -232,6 +232,95 @@ def _thin_draws(draws: np.ndarray, n_target: int) -> np.ndarray:
     return arr[idx]
 
 
+def _fit_sbc_worlds(
+    prior: HyperPrior,
+    n_worlds: int,
+    base_seed: int,
+) -> tuple[list[tuple[Any, dict[str, Any], int]], list[dict[str, Any]], list[int]]:
+    accepted_worlds: list[tuple[Any, dict[str, Any], int]] = []
+    discarded_worlds: list[dict[str, Any]] = []
+    seeds_used = list(range(base_seed, base_seed + n_worlds))
+
+    for world_index, seed in enumerate(seeds_used):
+        world = sample_world(prior, seed=seed)
+        posterior = fit_measurement_layer(world, seed=seed)
+        accepted, reasons = _posterior_diagnostics_acceptance(posterior)
+        if accepted:
+            accepted_worlds.append((world, posterior, seed))
+            continue
+        discarded_worlds.append({
+            "world_index": world_index,
+            "seed": seed,
+            "reasons": reasons,
+            "diagnostics": posterior.get("diagnostics") or {},
+        })
+
+    return accepted_worlds, discarded_worlds, seeds_used
+
+
+def _collect_parameter_ranks(
+    accepted_worlds: list[tuple[Any, dict[str, Any], int]],
+    n_draws_per_fit: int,
+) -> dict[str, list[int]]:
+    if n_draws_per_fit < 4:
+        return {}
+
+    parameter_ranks: dict[str, list[int]] = {}
+    for world, posterior, _seed in accepted_worlds:
+        for name, true_value in flatten_params(world.theta).items():
+            draws = posterior["draws"].get(name)
+            if draws is None:
+                continue
+            thinned = _thin_draws(np.asarray(draws), n_draws_per_fit)
+            parameter_ranks.setdefault(name, []).append(
+                rank_statistic(true_value, thinned)
+            )
+    return parameter_ranks
+
+
+def _per_parameter_diagnostics(
+    parameter_ranks: dict[str, list[int]],
+    n_draws_per_fit: int,
+) -> dict[str, dict]:
+    per_param: dict[str, dict] = {}
+    for name, ranks in parameter_ranks.items():
+        arr = np.asarray(ranks)
+        ks = ks_uniformity_test(arr, n_draws_per_fit)
+        hd = histogram_diagnostics(arr, n_draws_per_fit)
+        per_param[name] = {**ks, **hd}
+    return per_param
+
+
+def _sbc_convergence_result(
+    n_accepted: int,
+    n_draws_per_fit: int,
+    discard_fraction: float,
+) -> tuple[bool, str]:
+    if n_accepted == 0:
+        return True, "all_sbc_worlds_discarded_by_convergence_screen"
+    if n_draws_per_fit < 4:
+        return True, f"sbc_rank_draws_{n_draws_per_fit}_below_minimum_4"
+    if discard_fraction > SBC_MAX_DISCARD_FRACTION:
+        return (
+            True,
+            f"sbc_discard_fraction_{discard_fraction:.3f}_exceeds_"
+            f"{SBC_MAX_DISCARD_FRACTION}",
+        )
+    return False, "sbc_world_convergence_screen_passed"
+
+
+def _sbc_summary_reason(
+    failed: list[str],
+    convergence_failed: bool,
+    convergence_reason: str,
+) -> str:
+    if not failed:
+        return "rank_histograms_uniform"
+    if convergence_failed:
+        return convergence_reason
+    return f"chi2_rank_histogram_fail_on_{len(failed)}_tests"
+
+
 def run_sbc(
     n_worlds: int = 200,
     prior: HyperPrior | None = None,
@@ -251,23 +340,11 @@ def run_sbc(
     out_dir.mkdir(parents=True, exist_ok=True)
     prior = prior or HyperPrior(R=2, T=12, L=3, K=3, S=3, M=2, H=0)
 
-    accepted_worlds: list[tuple[Any, dict[str, Any], int]] = []
-    discarded_worlds: list[dict[str, Any]] = []
-    seeds_used = list(range(base_seed, base_seed + n_worlds))
-
-    for w, seed in enumerate(seeds_used):
-        world = sample_world(prior, seed=seed)
-        posterior = fit_measurement_layer(world, seed=seed)
-        accepted, reasons = _posterior_diagnostics_acceptance(posterior)
-        if not accepted:
-            discarded_worlds.append({
-                "world_index": w,
-                "seed": seed,
-                "reasons": reasons,
-                "diagnostics": posterior.get("diagnostics") or {},
-            })
-            continue
-        accepted_worlds.append((world, posterior, seed))
+    accepted_worlds, discarded_worlds, seeds_used = _fit_sbc_worlds(
+        prior,
+        n_worlds,
+        base_seed,
+    )
 
     n_accepted = len(accepted_worlds)
     discard_fraction = (len(discarded_worlds) / n_worlds) if n_worlds else 0.0
@@ -275,45 +352,13 @@ def run_sbc(
         [posterior for _world, posterior, _seed in accepted_worlds]
     )
 
-    parameter_ranks: dict[str, list[int]] = {}
-    if n_draws_per_fit >= 4:
-        for world, posterior, _seed in accepted_worlds:
-            for name, true_value in flatten_params(world.theta).items():
-                draws = posterior["draws"].get(name)
-                if draws is None:
-                    continue
-                thinned = _thin_draws(np.asarray(draws), n_draws_per_fit)
-                parameter_ranks.setdefault(name, []).append(
-                    rank_statistic(true_value, thinned)
-                )
-
-    if n_draws_per_fit < 4:
-        parameter_ranks = {}
-
-    # Build per-parameter diagnostics: KS + B-6 histogram shape
-    per_param: dict[str, dict] = {}
-    for name, ranks in parameter_ranks.items():
-        arr = np.asarray(ranks)
-        ks  = ks_uniformity_test(arr, n_draws_per_fit)
-        hd  = histogram_diagnostics(arr, n_draws_per_fit)
-        per_param[name] = {**ks, **hd}
-
-    convergence_failed = (
-        n_accepted == 0
-        or n_draws_per_fit < 4
-        or discard_fraction > SBC_MAX_DISCARD_FRACTION
+    parameter_ranks = _collect_parameter_ranks(accepted_worlds, n_draws_per_fit)
+    per_param = _per_parameter_diagnostics(parameter_ranks, n_draws_per_fit)
+    convergence_failed, convergence_reason = _sbc_convergence_result(
+        n_accepted,
+        n_draws_per_fit,
+        discard_fraction,
     )
-
-    convergence_reason = "sbc_world_convergence_screen_passed"
-    if n_accepted == 0:
-        convergence_reason = "all_sbc_worlds_discarded_by_convergence_screen"
-    elif n_draws_per_fit < 4:
-        convergence_reason = f"sbc_rank_draws_{n_draws_per_fit}_below_minimum_4"
-    elif discard_fraction > SBC_MAX_DISCARD_FRACTION:
-        convergence_reason = (
-            f"sbc_discard_fraction_{discard_fraction:.3f}_exceeds_"
-            f"{SBC_MAX_DISCARD_FRACTION}"
-        )
 
     summary: dict[str, Any] = {
         "model_version": MODEL_VERSION,
@@ -354,13 +399,7 @@ def run_sbc(
         failed = sorted(set(failed) | {"__sbc_convergence_screen__"})
     summary["failed_parameters"] = failed
     summary["gate_status"] = "pass" if not failed else "fail"
-    summary["reason"] = (
-        "rank_histograms_uniform" if not failed
-        else (
-            convergence_reason if convergence_failed
-            else f"chi2_rank_histogram_fail_on_{len(failed)}_tests"
-        )
-    )
+    summary["reason"] = _sbc_summary_reason(failed, convergence_failed, convergence_reason)
     summary_path = out_dir / "sbc_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2))
     summary["summary_path"] = str(summary_path)

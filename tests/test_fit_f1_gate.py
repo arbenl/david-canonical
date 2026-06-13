@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 
 def _fit_data() -> dict:
     return {
@@ -45,6 +47,6 @@ def test_f1_gate_uses_frozen_reference_band(tmp_path, monkeypatch):
     result = _run_f1_gate(_fit_data(), n_prior_worlds=2)
 
     assert result["gate_status"] == "pass"
-    assert result["historical_band_5th"] == 0.0
-    assert result["historical_band_95th"] == 1.0
+    assert result["historical_band_5th"] == pytest.approx(0.0)
+    assert result["historical_band_95th"] == pytest.approx(1.0)
     assert result["reference_version"] == "test"

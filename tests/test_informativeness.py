@@ -268,12 +268,12 @@ def test_production_a_prime_uses_worst_observability_grid(monkeypatch):
     mock_fit._vars["j_observability"] = np.full((D, S), 2.0 * low_logit)
     mock_fit._vars["j_raw"] = np.full((D, S), -low_logit)
 
-    def fake_autocorrelation(Pi_off_diag, dwell_mean, phi_k, max_lag, n_mc=500):
+    def fake_autocorrelation(pi_off_diag, dwell_mean, phi_k, max_lag, n_mc=500):
         return np.zeros(max_lag)
 
     def fake_horizon_validity(
         cell_id,
-        Pi_off_diag_draws,
+        pi_off_diag_draws,
         dwell_mean_draws,
         z_t_distribution,
         z_future_draws,
@@ -376,13 +376,13 @@ def test_production_gates_pass_shifted_poisson_mean_to_renewal_kernels(monkeypat
         "horizon_dwell": [],
     }
 
-    def fake_autocorrelation(Pi_off_diag, dwell_mean, phi_k, max_lag, n_mc=500):
+    def fake_autocorrelation(pi_off_diag, dwell_mean, phi_k, max_lag, n_mc=500):
         captured["autocorr_dwell"].append(np.asarray(dwell_mean).copy())
         return np.zeros(max_lag)
 
     def fake_horizon_validity(
         cell_id,
-        Pi_off_diag_draws,
+        pi_off_diag_draws,
         dwell_mean_draws,
         z_t_distribution,
         z_future_draws,
@@ -437,12 +437,12 @@ def test_production_d_prime_gates_on_minimum_regime_q05(monkeypatch):
     captured_z_t: dict[str, np.ndarray] = {}
     captured_z_future: dict[str, np.ndarray] = {}
 
-    def fake_autocorrelation(Pi_off_diag, dwell_mean, phi_k, max_lag, n_mc=500):
+    def fake_autocorrelation(pi_off_diag, dwell_mean, phi_k, max_lag, n_mc=500):
         return np.zeros(max_lag)
 
     def fake_horizon_validity(
         cell_id,
-        Pi_off_diag_draws,
+        pi_off_diag_draws,
         dwell_mean_draws,
         z_t_distribution,
         z_future_draws,
@@ -498,12 +498,12 @@ def test_production_d_prime_records_prior_sensitivity_route_changes(monkeypatch)
     mock_fit = _make_mock_fit(D, S, L, K, I_val=0.50)
     mock_fit._vars["dwell_lambda"] = np.full((D, L), 2.0)
 
-    def fake_autocorrelation(Pi_off_diag, dwell_mean, phi_k, max_lag, n_mc=500):
+    def fake_autocorrelation(pi_off_diag, dwell_mean, phi_k, max_lag, n_mc=500):
         return np.zeros(max_lag)
 
     def fake_horizon_validity(
         cell_id,
-        Pi_off_diag_draws,
+        pi_off_diag_draws,
         dwell_mean_draws,
         z_t_distribution,
         z_future_draws,

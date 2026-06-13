@@ -165,8 +165,6 @@ def _split_chain_matrix(draws: np.ndarray) -> np.ndarray:
         return arr.reshape(n_chains, n_draws)
 
     half = n_draws // 2
-    if half < 2:
-        return arr.reshape(n_chains, n_draws)
     trimmed = arr[:, : 2 * half]
     first = trimmed[:, :half]
     second = trimmed[:, half:]
@@ -266,7 +264,7 @@ def check_mcse_floor(
     cells from the claim-eligible family before calling
     ``compute_posterior_fdp_threshold``.
     """
-    flat_draws, n_chains, n_draws_per_chain = _flatten_draws_preserving_chain_axis(joint_draws)
+    flat_draws, _, _ = _flatten_draws_preserving_chain_axis(joint_draws)
     n_total_draws, n_cells = flat_draws.shape
     if n_total_draws < 4:
         raise ValueError("joint_draws must contain at least 4 draws for ESS estimation")

@@ -506,13 +506,13 @@ def _stan_data_only(data: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in data.items() if not k.startswith("_")}
 
 
-def _default_kappa_raw_priors(M: int) -> dict[str, list[float]]:
+def _default_kappa_raw_priors(n_coders: int) -> dict[str, list[float]]:
     return {
-        "kappa_plus_raw_prior_mean": [1.0] * M,
-        "kappa_plus_raw_prior_sd": [0.5] * M,
-        "kappa_minus_raw_prior_mean": [1.0] * M,
-        "kappa_minus_raw_prior_sd": [0.5] * M,
-        "coder_likelihood_weight": [1.0] * M,
+        "kappa_plus_raw_prior_mean": [1.0] * n_coders,
+        "kappa_plus_raw_prior_sd": [0.5] * n_coders,
+        "kappa_minus_raw_prior_mean": [1.0] * n_coders,
+        "kappa_minus_raw_prior_sd": [0.5] * n_coders,
+        "coder_likelihood_weight": [1.0] * n_coders,
     }
 
 
@@ -669,7 +669,7 @@ def _min_units_per_series_tactic(data: dict[str, Any]) -> int:
     return max(1, U // (R * K))
 
 
-def _run_theorem_gates(fit: Any, data: dict[str, Any]) -> dict[str, Any]:
+def _run_theorem_gates(fit: Any, data: dict[str, Any]) -> dict[str, Any]:  # NOSONAR - fail-closed theorem ledger coordinator
     """Extract posterior draws and run theorem A'/B'/C'/D' gates.
 
     Each theorem returns a typed dict with a 'gate_status' key.
@@ -712,9 +712,9 @@ def _run_theorem_gates(fit: Any, data: dict[str, Any]) -> dict[str, Any]:
         j_raw_d[:, None, :] + j_obs_d[:, None, :] * obs_grid[None, :, None]
     )  # (D, G, S)
     rho_grid_d = delta_grid_d + (1.0 - delta_grid_d) * j_grid_d  # (D, G, S)
-    O_rep_idx = int(np.argmin(np.abs(obs_grid - 0.5)))
-    delta_d = delta_grid_d[:, O_rep_idx, :]  # (D, S)
-    rho_d = rho_grid_d[:, O_rep_idx, :]      # (D, S)
+    o_rep_idx = int(np.argmin(np.abs(obs_grid - 0.5)))
+    delta_d = delta_grid_d[:, o_rep_idx, :]  # (D, S)
+    rho_d = rho_grid_d[:, o_rep_idx, :]      # (D, S)
     if terminal_regime_d.ndim == 2:
         terminal_regime_for_a = terminal_regime_d[:, None, :]
     else:
@@ -782,20 +782,20 @@ def _run_theorem_gates(fit: Any, data: dict[str, Any]) -> dict[str, Any]:
 
     # ── Theorem B' — source informativeness ───────────────────────────────────
     try:
-        I_d = informativeness_draws(rho_grid_d, delta_grid_d)       # (D, G, S)
-        if I_d.shape[2] >= 3:
-            I_by_obs = np.sort(I_d, axis=2)[:, :, ::-1][:, :, 2]
+        i_draws = informativeness_draws(rho_grid_d, delta_grid_d)       # (D, G, S)
+        if i_draws.shape[2] >= 3:
+            i_by_obs = np.sort(i_draws, axis=2)[:, :, ::-1][:, :, 2]
             source_aggregation = "third_largest_source"
         else:
-            I_by_obs = I_d.min(axis=2)
+            i_by_obs = i_draws.min(axis=2)
             source_aggregation = "min_source_under_sourced"
-        I_gate = I_by_obs.min(axis=1)
-        I_med_by_obs = np.median(I_by_obs, axis=0)
-        worst_I_obs_idx = int(np.argmin(I_med_by_obs))
-        I_lower95  = float(np.quantile(I_gate, 0.025))
-        I_med      = float(np.median(I_gate))
+        i_gate = i_by_obs.min(axis=1)
+        i_med_by_obs = np.median(i_by_obs, axis=0)
+        worst_i_obs_idx = int(np.argmin(i_med_by_obs))
+        i_lower95  = float(np.quantile(i_gate, 0.025))
+        i_median      = float(np.median(i_gate))
         # Gate 1: I lower-95 floor
-        gate1_pass = I_lower95 >= INFORMATIVENESS_FLOOR_LOWER_95
+        gate1_pass = i_lower95 >= INFORMATIVENESS_FLOOR_LOWER_95
         # Gate 2: N_eff × I² floor (pre-registered N_EFF_I2_FLOOR = 3.0).
         # Implement Godambe dependence adjustment:
         from ..theorems.B_prime import dependence_adjusted_n_eff, compute_activity_autocorrelation
@@ -824,29 +824,29 @@ def _run_theorem_gates(fit: Any, data: dict[str, Any]) -> dict[str, Any]:
         p_med = rho_med * phi_med + delta_med * (1.0 - phi_med)
 
         n_units   = _min_units_per_series_tactic(data)
-        n_adj = dependence_adjusted_n_eff(n_units, I_med, phi_med, p_med, corr_A_h)
-        n_eff_i2  = n_adj * (I_med ** 2)
+        n_adj = dependence_adjusted_n_eff(n_units, i_median, phi_med, p_med, corr_A_h)
+        n_eff_i2  = n_adj * (i_median ** 2)
         gate2_pass = n_eff_i2 >= N_EFF_I2_FLOOR
         if gate1_pass and gate2_pass:
             b_status = "pass"
             b_reason = "I_lower_95_and_N_eff_I2_above_floor"
         elif not gate1_pass:
             b_status = "fail"
-            b_reason = f"I_lower95_{I_lower95:.4f}_below_floor_{INFORMATIVENESS_FLOOR_LOWER_95}"
+            b_reason = f"I_lower95_{i_lower95:.4f}_below_floor_{INFORMATIVENESS_FLOOR_LOWER_95}"
         else:
             b_status = "fail"
             b_reason = f"N_eff_I2_{n_eff_i2:.2f}_below_floor_{N_EFF_I2_FLOOR}"
         gates["B_prime"] = {
             "theorem": "B_prime",
-            "median_I_worst_source": I_med,
-            "lower_95_I_worst_source": I_lower95,
+            "median_I_worst_source": i_median,
+            "lower_95_I_worst_source": i_lower95,
             "source_aggregation": source_aggregation,
             "observability_grid": [float(x) for x in obs_grid],
             "observability_aggregation": "min_over_pre_registered_grid",
-            "worst_observability": float(obs_grid[worst_I_obs_idx]),
+            "worst_observability": float(obs_grid[worst_i_obs_idx]),
             "median_I_by_observability": {
                 f"{float(obs):.6g}": float(val)
-                for obs, val in zip(obs_grid, I_med_by_obs, strict=False)
+                for obs, val in zip(obs_grid, i_med_by_obs, strict=False)
             },
             "floor": INFORMATIVENESS_FLOOR_LOWER_95,
             "n_units": n_units,
@@ -888,10 +888,10 @@ def _run_theorem_gates(fit: Any, data: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(
                 "terminal_regime_posterior_draw must have shape (draws, series, regimes)"
             )
-        R_val = terminal_regime_d.shape[1]
+        r_val = terminal_regime_d.shape[1]
         if z_future_d.ndim == 2:
             z_future_d = z_future_d[:, None, :]
-        if z_future_d.shape[0] != D_draws or z_future_d.shape[1] != R_val:
+        if z_future_d.shape[0] != D_draws or z_future_d.shape[1] != r_val:
             raise ValueError("z_future must have shape (draws, series, horizons)")
         if z_future_d.shape[2] < max(FORECAST_HORIZONS_MONTHS):
             raise ValueError("z_future does not cover all pre-registered forecast horizons")
@@ -913,10 +913,10 @@ def _run_theorem_gates(fit: Any, data: dict[str, Any]) -> dict[str, Any]:
             h_stars_q05_per_series: list[int] = []
             h_stars_q95_per_series: list[int] = []
             last_hv = None
-            for _r in range(R_val):
+            for _r in range(r_val):
                 hv_r = horizon_validity_from_z_future_draws(
                     cell_id=f"series_{_r}",
-                    Pi_off_diag_draws=Pi_d,
+                    pi_off_diag_draws=Pi_d,
                     dwell_mean_draws=dwell_mean_draws_for_gate,
                     z_t_distribution=terminal_regime_d[:, _r, :],
                     z_future_draws=z_future_d[:, _r, :],
@@ -936,7 +936,7 @@ def _run_theorem_gates(fit: Any, data: dict[str, Any]) -> dict[str, Any]:
                 "h_stars_q95_per_series": h_stars_q95_per_series,
             }, last_hv
 
-        nominal_h, D_hv = _h_star_summary(
+        nominal_h, d_hv = _h_star_summary(
             dwell_mean_d,
             n_bootstrap_for_gate=max(100, 250 // max(L_val, 1)),
         )
@@ -985,8 +985,8 @@ def _run_theorem_gates(fit: Any, data: dict[str, Any]) -> dict[str, Any]:
                 "route_change_horizons": prior_sensitive_horizons,
                 "sensitivity_changes_route": bool(prior_sensitive_horizons),
             },
-            "tau": D_hv.tau,
-            "prior_drift_share_at_h_max": D_hv.prior_drift_share_at_h_max,
+            "tau": d_hv.tau,
+            "prior_drift_share_at_h_max": d_hv.prior_drift_share_at_h_max,
             "forecast_horizons": list(FORECAST_HORIZONS_MONTHS),
             "gate_status": (
                 "pass" if h_star_gate >= min(FORECAST_HORIZONS_MONTHS)
