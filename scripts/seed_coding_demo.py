@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import csv
 import json
-import random
 import sys
 from datetime import timezone, datetime
 from pathlib import Path
+
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -29,7 +30,7 @@ from david.config import (
 )
 from david.ingest.normalize import is_tobacco_relevant
 
-random.seed(42)
+DEMO_NOISE_RNG = np.random.default_rng(42)
 
 # ── find latest normalized file ───────────────────────────────────────────────
 norm_dir = DATA_ROOT / "raw_normalized"
@@ -76,8 +77,8 @@ def true_label(item: dict, tactic: str) -> int:
 
 
 def noisy_label(true_y: int, accuracy: float) -> int:
-    """Flip with probability (1 - accuracy)."""
-    if random.random() < accuracy:
+    """Flip with probability (1 - accuracy) for deterministic demo data only."""
+    if DEMO_NOISE_RNG.random() < accuracy:
         return true_y
     return 1 - true_y
 
