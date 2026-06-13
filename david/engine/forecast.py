@@ -76,6 +76,50 @@ def load_posterior(fit_dir: Path) -> dict[str, np.ndarray]:
     return {col: df[col].to_numpy() for col in df.columns}
 
 
+class SbcFail(RuntimeError):
+    """B-8: raised by emit_forecasts when the falsification ledger records
+    sbc_block.sbc_passed == False.  Typed so callers can catch it explicitly."""
+
+    def __init__(self, failed_params: list[str], worst_p: float | None) -> None:
+        self.failed_params = failed_params
+        self.worst_p = worst_p
+        super().__init__(
+            f"SBC_FAIL_CLOSED: forecast emission refused — "
+            f"sbc_passed=False, failed_params={failed_params}, "
+            f"worst_p_value={worst_p}"
+        )
+
+
+def _sbc_guard(forecast_dir: Path, fit_dir: Path | None = None) -> None:
+    """B-8: Check the falsification ledger; raise SbcFail if SBC failed.
+
+    A missing ledger or missing sbc_block is not a block — it means
+    `david falsify` has not run yet for this cycle.  Only an explicit
+    sbc_passed=False in a written ledger is a hard stop.
+    """
+    ledger_paths = [forecast_dir / "falsification_ledger.json"]
+    if fit_dir is not None:
+        fit_ledger = fit_dir / "falsification_ledger.json"
+        if fit_ledger not in ledger_paths:
+            ledger_paths.append(fit_ledger)
+
+    for ledger_path in ledger_paths:
+        if not ledger_path.exists():
+            continue
+        try:
+            ledger = json.loads(ledger_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        sbc_block = ledger.get("sbc_block")
+        if not isinstance(sbc_block, dict):
+            continue
+        if sbc_block.get("sbc_passed") is False:
+            raise SbcFail(
+                failed_params=sbc_block.get("failed_params", []),
+                worst_p=sbc_block.get("worst_p_value"),
+            )
+
+
 def _parse_a_future(posterior: dict[str, np.ndarray]) -> dict[tuple[int, int, int], np.ndarray]:
     """Parse a_future[r,h,k] columns from the posterior dict.
 
@@ -130,6 +174,12 @@ def emit_forecasts(
 
     run_id = fit_dir.name
     out_dir = out_dir or FORECASTS_DIR / run_id
+
+    # B-8 fail-closed: refuse to emit forecasts if the falsification ledger
+    # records sbc_block.sbc_passed == False.  A missing ledger is not a block
+    # (falsify may not have run yet in this session); an explicit False is.
+    _sbc_guard(out_dir, fit_dir)
+
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Load posterior draws

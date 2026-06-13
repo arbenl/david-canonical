@@ -35,7 +35,7 @@ def test_ollama_backend_coding(monkeypatch):
         mock_probe = MagicMock()
         mock_probe.status_code = 200
         return mock_probe
-    monkeypatch.setattr(httpx.Client, "get", mock_get)
+    monkeypatch.setattr(httpx, "get", mock_get)
 
     backend = get_backend(cfg)
     assert isinstance(backend, OllamaBackend)

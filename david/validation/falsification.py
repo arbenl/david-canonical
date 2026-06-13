@@ -27,7 +27,12 @@ from ..simulator.adversarial_battery import run_battery
 
 
 def run_falsification() -> dict[str, Any]:
-    """Top-level: collect inputs, run battery, write ledger."""
+    """Top-level: collect inputs, run battery, write ledger.
+
+    B-7: the ledger now contains an ``sbc_block`` assembled from the most
+    recent measurement-SBC summary. This block is authoritative for the
+    B-8 fail-closed guard in emit_forecasts().
+    """
     fit_dir = _latest_fit_dir(FITS_DIR)
     forecast_dir = _latest_forecast_dir(FORECASTS_DIR, fit_dir)
     if fit_dir is None:
@@ -35,12 +40,14 @@ def run_falsification() -> dict[str, Any]:
 
     inputs = _assemble_inputs(fit_dir, forecast_dir)
     battery_result = run_battery(inputs=inputs)
+    sbc_block = _build_sbc_block()
 
     ledger_path = (forecast_dir or fit_dir) / "falsification_ledger.json"
     ledger = {
         "fit_dir": str(fit_dir),
         "forecast_dir": str(forecast_dir) if forecast_dir else None,
         "battery_result": battery_result,
+        "sbc_block": sbc_block,
         "timestamp": datetime.utcnow().isoformat() + "Z",
     }
     ledger_path.write_text(json.dumps(ledger, indent=2))
@@ -48,6 +55,83 @@ def run_falsification() -> dict[str, Any]:
         "gate_status": battery_result["gate_status"],
         "failed_tests": battery_result["failed_tests"],
         "ledger_path": str(ledger_path),
+        "sbc_passed": sbc_block["sbc_passed"],
+    }
+
+
+def _build_sbc_block() -> dict[str, Any]:
+    """B-7: Read measurement-SBC summary and produce the typed sbc_block.
+
+    Returns a dict with:
+      sbc_passed       bool | None
+      n_worlds         int | None
+      seeds            list[int]   (recorded seeds, or base_seed + world_index)
+      worst_p_value    float | None
+      failed_params    list[str]
+      sbc_summary_path str | None
+    """
+    sbc_path = FITS_DIR / "sbc" / "sbc_summary.json"
+    if not sbc_path.exists():
+        return {
+            "sbc_passed": None,
+            "n_worlds": None,
+            "seeds": [],
+            "worst_p_value": None,
+            "failed_params": [],
+            "sbc_summary_path": None,
+            "note": "sbc_summary.json not found — run `david sbc` first",
+        }
+
+    try:
+        sbc = json.loads(sbc_path.read_text())
+    except OSError as exc:
+        note = f"failed to read sbc_summary.json: {exc}"
+    except json.JSONDecodeError as exc:
+        note = f"failed to parse sbc_summary.json: {exc}"
+    else:
+        note = None
+
+    if note is not None:
+        return {
+            "sbc_passed": None,
+            "n_worlds": None,
+            "seeds": [],
+            "worst_p_value": None,
+            "failed_params": [],
+            "sbc_summary_path": str(sbc_path),
+            "note": note,
+        }
+
+    per_param = sbc.get("per_parameter_ks", {})
+    if not isinstance(per_param, dict):
+        per_param = {}
+    p_values = [
+        v["pvalue"]
+        for v in per_param.values()
+        if isinstance(v, dict)
+        and isinstance(v.get("pvalue"), float)
+        and not np.isnan(v["pvalue"])
+    ]
+    worst_p = min(p_values) if p_values else None
+    failed  = sbc.get("failed_parameters", [])
+    passed  = sbc.get("gate_status") == "pass"
+
+    n_worlds = sbc.get("n_worlds")
+    base_seed = sbc.get("base_seed", 0)
+    if "seeds" in sbc:
+        seeds = sbc["seeds"]
+    elif isinstance(n_worlds, int) and isinstance(base_seed, int):
+        seeds = list(range(base_seed, base_seed + n_worlds))
+    else:
+        seeds = []
+
+    return {
+        "sbc_passed": passed,
+        "n_worlds": n_worlds,
+        "seeds": seeds,
+        "worst_p_value": worst_p,
+        "failed_params": failed,
+        "sbc_summary_path": str(sbc_path),
     }
 
 
