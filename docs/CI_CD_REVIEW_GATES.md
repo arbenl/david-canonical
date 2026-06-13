@@ -11,14 +11,18 @@ review gates for merge readiness.
 - `CI / Next.js build`: installs `david-ui` with `npm ci` and runs
   `npm run build`.
 - `CodeQL`: scans Python and JavaScript/TypeScript with
-  `security-extended` and `security-and-quality` queries.
+  `security-extended` and `security-and-quality` queries when GitHub code
+  scanning is enabled and repository variable `CODEQL_ENABLED=true` is set.
+  Until then, the workflow reports a successful skip and SonarQube Cloud is the
+  required SAST/security gate.
 - `SonarQube`: runs only after these repository settings are configured:
   - secret `SONAR_TOKEN`
   - variable `SONAR_PROJECT_KEY`
   - variable `SONAR_ORGANIZATION`
 
-Make the Python, UI, CodeQL, and Sonar jobs required branch-protection checks
-once Sonar is configured.
+Make the Python, UI, and Sonar jobs required branch-protection checks once
+Sonar is configured. Add CodeQL as required only after GitHub code scanning is
+enabled for the private repository.
 
 ## Advisory Checks
 

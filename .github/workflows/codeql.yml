@@ -18,8 +18,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  codeql-disabled:
+    name: CodeQL unavailable
+    if: vars.CODEQL_ENABLED != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain CodeQL status
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'MD'
+          ## CodeQL skipped
+
+          CodeQL upload requires GitHub code scanning to be enabled for this
+          private repository. SonarQube Cloud is the required quality and
+          security gate for this branch.
+
+          To enable this workflow later:
+
+          1. Enable code scanning / GitHub Advanced Security for the repository.
+          2. Set repository variable `CODEQL_ENABLED=true`.
+          MD
+
   analyze:
     name: CodeQL (${{ matrix.language }})
+    if: vars.CODEQL_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
