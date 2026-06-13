@@ -63,12 +63,12 @@ def _build_sbc_block() -> dict[str, Any]:
     """B-7: Read measurement-SBC summary and produce the typed sbc_block.
 
     Returns a dict with:
-      sbc_passed      bool
-      n_worlds        int
-      seeds           list[int]   (base_seed + world_index)
-      worst_p_value   float       (minimum KS p-value across all parameters)
-      failed_params   list[str]
-      sbc_summary_path str | null
+      sbc_passed       bool | None
+      n_worlds         int | None
+      seeds            list[int]   (recorded seeds, or base_seed + world_index)
+      worst_p_value    float | None
+      failed_params    list[str]
+      sbc_summary_path str | None
     """
     sbc_path = FITS_DIR / "sbc" / "sbc_summary.json"
     if not sbc_path.exists():
@@ -105,10 +105,19 @@ def _build_sbc_block() -> dict[str, Any]:
     failed  = sbc.get("failed_parameters", [])
     passed  = sbc.get("gate_status") == "pass"
 
+    n_worlds = sbc.get("n_worlds")
+    base_seed = sbc.get("base_seed", 0)
+    if "seeds" in sbc:
+        seeds = sbc["seeds"]
+    elif isinstance(n_worlds, int) and isinstance(base_seed, int):
+        seeds = list(range(base_seed, base_seed + n_worlds))
+    else:
+        seeds = []
+
     return {
         "sbc_passed": passed,
-        "n_worlds": sbc.get("n_worlds"),
-        "seeds": sbc.get("seeds", list(range(sbc.get("n_worlds", 0)))),
+        "n_worlds": n_worlds,
+        "seeds": seeds,
         "worst_p_value": worst_p,
         "failed_params": failed,
         "sbc_summary_path": str(sbc_path),

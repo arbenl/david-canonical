@@ -90,28 +90,34 @@ class SbcFail(RuntimeError):
         )
 
 
-def _sbc_guard(forecast_dir: Path) -> None:
+def _sbc_guard(forecast_dir: Path, fit_dir: Path | None = None) -> None:
     """B-8: Check the falsification ledger; raise SbcFail if SBC failed.
 
     A missing ledger or missing sbc_block is not a block — it means
     `david falsify` has not run yet for this cycle.  Only an explicit
     sbc_passed=False in a written ledger is a hard stop.
     """
-    ledger_path = forecast_dir / "falsification_ledger.json"
-    if not ledger_path.exists():
-        return
-    try:
-        ledger = json.loads(ledger_path.read_text())
-    except Exception:
-        return
-    sbc_block = ledger.get("sbc_block")
-    if sbc_block is None:
-        return
-    if sbc_block.get("sbc_passed") is False:
-        raise SbcFail(
-            failed_params=sbc_block.get("failed_params", []),
-            worst_p=sbc_block.get("worst_p_value"),
-        )
+    ledger_paths = [forecast_dir / "falsification_ledger.json"]
+    if fit_dir is not None:
+        fit_ledger = fit_dir / "falsification_ledger.json"
+        if fit_ledger not in ledger_paths:
+            ledger_paths.append(fit_ledger)
+
+    for ledger_path in ledger_paths:
+        if not ledger_path.exists():
+            continue
+        try:
+            ledger = json.loads(ledger_path.read_text())
+        except Exception:
+            continue
+        sbc_block = ledger.get("sbc_block")
+        if sbc_block is None:
+            continue
+        if sbc_block.get("sbc_passed") is False:
+            raise SbcFail(
+                failed_params=sbc_block.get("failed_params", []),
+                worst_p=sbc_block.get("worst_p_value"),
+            )
 
 
 def _parse_a_future(posterior: dict[str, np.ndarray]) -> dict[tuple[int, int, int], np.ndarray]:
@@ -172,7 +178,7 @@ def emit_forecasts(
     # B-8 fail-closed: refuse to emit forecasts if the falsification ledger
     # records sbc_block.sbc_passed == False.  A missing ledger is not a block
     # (falsify may not have run yet in this session); an explicit False is.
-    _sbc_guard(FORECASTS_DIR / run_id)
+    _sbc_guard(out_dir, fit_dir)
 
     out_dir.mkdir(parents=True, exist_ok=True)
 

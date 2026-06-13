@@ -223,6 +223,23 @@ def test_sbc_block_missing_summary(tmp_path):
     assert "note" in block
 
 
+def test_sbc_block_derives_missing_seeds_from_base_seed(tmp_path):
+    from david.validation.falsification import _build_sbc_block
+
+    fits_dir = tmp_path / "fits"
+    _write_sbc_summary(fits_dir / "sbc", n_worlds=4, passed=True)
+    summary_path = fits_dir / "sbc" / "sbc_summary.json"
+    summary = json.loads(summary_path.read_text())
+    summary["base_seed"] = 42
+    summary.pop("seeds")
+    summary_path.write_text(json.dumps(summary))
+
+    with patch("david.validation.falsification.FITS_DIR", fits_dir):
+        block = _build_sbc_block()
+
+    assert block["seeds"] == [42, 43, 44, 45]
+
+
 def _make_falsification_ledger(
     forecast_dir: Path,
     fits_dir: Path,
@@ -296,6 +313,23 @@ def test_sbc_guard_raises_when_sbc_passed_false(tmp_path):
     assert exc_info.value.worst_p == pytest.approx(0.001)
 
 
+def test_sbc_guard_raises_when_fit_dir_ledger_failed(tmp_path):
+    forecast_dir = tmp_path / "forecasts" / "run1"
+    fit_dir = tmp_path / "fits" / "run1"
+    fit_dir.mkdir(parents=True)
+    ledger = {
+        "sbc_block": {
+            "sbc_passed": False,
+            "failed_params": ["theta[0]"],
+            "worst_p_value": 0.001,
+        }
+    }
+    (fit_dir / "falsification_ledger.json").write_text(json.dumps(ledger))
+
+    with pytest.raises(SbcFail):
+        _sbc_guard(forecast_dir, fit_dir)
+
+
 def test_sbc_fail_message_is_typed(tmp_path):
     """SbcFail str representation includes SBC_FAIL_CLOSED keyword."""
     ledger = {
@@ -348,6 +382,33 @@ def test_emit_forecasts_raises_sbc_fail(tmp_path):
         "run_id": "run_test",
         "gate_status": "pass",
         "timestamp": "2026-06-12T00:00:00Z",
+    }))
+
+    with (
+        patch("david.engine.forecast.FORECASTS_DIR", tmp_path / "forecasts"),
+        patch("david.engine.forecast.latest_fit_dir", return_value=fit_dir),
+    ):
+        with pytest.raises(SbcFail):
+            emit_forecasts(horizon_months=6, fit_dir=fit_dir)
+
+
+def test_emit_forecasts_raises_sbc_fail_from_fit_dir_ledger(tmp_path):
+    """emit_forecasts checks falsify-before-forecast ledger placement."""
+    from david.engine.forecast import emit_forecasts
+
+    fit_dir = tmp_path / "fits" / "run_test"
+    fit_dir.mkdir(parents=True, exist_ok=True)
+    (fit_dir / "fit_summary.json").write_text(json.dumps({
+        "run_id": "run_test",
+        "gate_status": "pass",
+        "timestamp": "2026-06-12T00:00:00Z",
+    }))
+    (fit_dir / "falsification_ledger.json").write_text(json.dumps({
+        "sbc_block": {
+            "sbc_passed": False,
+            "failed_params": ["theta[0]"],
+            "worst_p_value": 0.001,
+        }
     }))
 
     with (
