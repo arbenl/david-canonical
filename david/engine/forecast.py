@@ -108,10 +108,10 @@ def _sbc_guard(forecast_dir: Path, fit_dir: Path | None = None) -> None:
             continue
         try:
             ledger = json.loads(ledger_path.read_text())
-        except Exception:
+        except (OSError, json.JSONDecodeError):
             continue
         sbc_block = ledger.get("sbc_block")
-        if sbc_block is None:
+        if not isinstance(sbc_block, dict):
             continue
         if sbc_block.get("sbc_passed") is False:
             raise SbcFail(

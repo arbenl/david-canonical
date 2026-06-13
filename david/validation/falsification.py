@@ -84,7 +84,14 @@ def _build_sbc_block() -> dict[str, Any]:
 
     try:
         sbc = json.loads(sbc_path.read_text())
-    except Exception as exc:
+    except OSError as exc:
+        note = f"failed to read sbc_summary.json: {exc}"
+    except json.JSONDecodeError as exc:
+        note = f"failed to parse sbc_summary.json: {exc}"
+    else:
+        note = None
+
+    if note is not None:
         return {
             "sbc_passed": None,
             "n_worlds": None,
@@ -92,14 +99,18 @@ def _build_sbc_block() -> dict[str, Any]:
             "worst_p_value": None,
             "failed_params": [],
             "sbc_summary_path": str(sbc_path),
-            "note": f"failed to parse sbc_summary.json: {exc}",
+            "note": note,
         }
 
     per_param = sbc.get("per_parameter_ks", {})
+    if not isinstance(per_param, dict):
+        per_param = {}
     p_values = [
         v["pvalue"]
         for v in per_param.values()
-        if isinstance(v.get("pvalue"), float) and not (v["pvalue"] != v["pvalue"])
+        if isinstance(v, dict)
+        and isinstance(v.get("pvalue"), float)
+        and not (v["pvalue"] != v["pvalue"])
     ]
     worst_p = min(p_values) if p_values else None
     failed  = sbc.get("failed_parameters", [])
