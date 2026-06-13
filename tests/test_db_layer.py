@@ -348,6 +348,39 @@ def test_assemble_fit_data_fails_closed_on_low_kappa_calibration(tmp_path, monke
         assemble_fit_data(input_dir=tmp_path, L=3, H_forecast=3)
 
 
+def test_assemble_fit_data_source_independence_uses_labeled_sources_only(tmp_path, monkeypatch):
+    from david.model.fit import assemble_fit_data
+
+    def _failing_get_adjudicated():
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr("david.db.repositories.get_adjudicated_data", _failing_get_adjudicated)
+    coded_dir = tmp_path / "coded"
+    coded_dir.mkdir()
+    monkeypatch.setattr("david.model.fit.CODED_DIR", coded_dir)
+
+    (tmp_path / "strata.csv").write_text("stratum_g,I_O\nsg1,0.5\n")
+    (tmp_path / "sources.csv").write_text("source_id\nsrc1\nsrc2\nsrc3\n")
+    (tmp_path / "evidence_items.csv").write_text(
+        "evidence_id,stratum_g,source_id,evidence_date\n"
+        "ev1,sg1,src1,2024-01-01\n"
+    )
+    (tmp_path / "coder_labels.csv").write_text(
+        "evidence_id,coder_id,label,tactic_k,source_id\nev1,human_1,1,SIO,src1\n"
+    )
+    (coded_dir / "coder_calibration_v001.json").write_text(json.dumps({
+        "coders": ["human_1"],
+        "kappa_plus": [{"mean": 0.875, "sd": 0.05}],
+        "kappa_minus": [{"mean": 0.825, "sd": 0.06}],
+    }))
+
+    data = assemble_fit_data(input_dir=tmp_path, L=3, H_forecast=3)
+
+    assert data["_source_ids"] == ["src1"]
+    assert data["_source_independence"]["gate_status"] == "fail"
+    assert data["_source_independence"]["reason"] == "fewer_than_3_active_sources"
+
+
 def test_calibrated_fit_data_discounts_multiple_coders_as_one_family(tmp_path, monkeypatch):
     import json
     from david.model.fit import assemble_fit_data

@@ -165,6 +165,18 @@ def test_sbc_chi_square_bh_gate_rejects_extreme_parameter():
     assert "theta_bad" in gate["failed_parameters"]
 
 
+def test_sbc_bh_gate_sorts_by_p_value_not_parameter_name():
+    per_param = {
+        "z_name_low_p": {"chi_squared": 40.0, "chi_squared_p": 0.001},
+        "a_name_high_p": {"chi_squared": 2.0, "chi_squared_p": 0.8},
+        "m_name_mid_p": {"chi_squared": 4.0, "chi_squared_p": 0.2},
+    }
+
+    gate = _sbc_gate_failures_from_diagnostics(per_param, alpha=0.05)
+
+    assert gate["bh_failed_parameters"] == ["z_name_low_p"]
+
+
 def _fake_sbc_world(seed: int) -> SimpleNamespace:
     return SimpleNamespace(theta={"theta": 0.5 + 0.001 * seed})
 

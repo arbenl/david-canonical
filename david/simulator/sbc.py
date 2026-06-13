@@ -127,8 +127,11 @@ def _benjamini_hochberg_rejections(
     alpha: float,
 ) -> list[str]:
     finite = sorted(
-        (name, p) for name, p in p_values.items()
-        if isinstance(p, float) and np.isfinite(p)
+        (
+            (name, p) for name, p in p_values.items()
+            if isinstance(p, float) and np.isfinite(p)
+        ),
+        key=lambda item: item[1],
     )
     m = len(finite)
     if m == 0:

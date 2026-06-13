@@ -1,0 +1,7 @@
+{
+  "version": "m01_f1_reference_2026_06_13",
+  "reference_window": "frozen_pre_m01_reference_2020_01_01_to_2024_12_31",
+  "historical_band_5th": 0.05,
+  "historical_band_95th": 0.314,
+  "source": "Frozen reference band for F1 prior-predictive realism; disjoint from current fit data and locked by M0.1 audit P6."
+}

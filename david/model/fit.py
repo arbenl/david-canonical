@@ -474,9 +474,11 @@ def _build_stan_data_from_rows(
         if require_coder_calibration
         else _default_kappa_raw_priors(M)
     )
+    active_source_indices = set(label_source)
     active_source_ids = [
         source_id
-        for source_id, _idx in sorted(source_to_index.items(), key=lambda kv: kv[1])
+        for source_id, idx in sorted(source_to_index.items(), key=lambda kv: kv[1])
+        if idx in active_source_indices
     ]
 
     return {

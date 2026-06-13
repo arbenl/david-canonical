@@ -24,8 +24,10 @@ def load_ledger() -> dict:
         current_path = CONFIG_ROOT / "source_independence.json"
         path = current_path if current_path.exists() else path
     if not path.exists():
-        return {"reviewed_on": None, "pairs": {}}
-    return _normalise_ledger(json.loads(path.read_text()))
+        return {"reviewed_on": None, "pairs": {}, "ledger_path": str(path)}
+    ledger = _normalise_ledger(json.loads(path.read_text()))
+    ledger["ledger_path"] = str(path)
+    return ledger
 
 
 def _normalise_ledger(raw: dict) -> dict:
@@ -141,7 +143,7 @@ def structural_independence_summary(
         "missing_pair_keys": missing,
         "reviewed_on": ledger.get("reviewed_on") or ledger.get("reviewed_at"),
         "next_review_due": ledger.get("next_review_due"),
-        "ledger_path": str(SOURCE_INDEPENDENCE_LEDGER),
+        "ledger_path": ledger.get("ledger_path", str(SOURCE_INDEPENDENCE_LEDGER)),
     }
 
 

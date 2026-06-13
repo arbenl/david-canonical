@@ -54,6 +54,23 @@ def test_structural_summary_passes_with_complete_above_floor_ledger():
     assert summary["missing_pair_keys"] == []
 
 
+def test_structural_summary_reports_loaded_ledger_path():
+    ledger = {
+        "reviewed_on": "2026-06-13",
+        "next_review_due": "2099-01-01",
+        "ledger_path": "/tmp/source_independence.json",
+        "pairs": {
+            "s1::s2": {"independence_score": 1.0},
+            "s1::s3": {"independence_score": 1.0},
+            "s2::s3": {"independence_score": 1.0},
+        },
+    }
+
+    summary = structural_independence_summary(["s1", "s2", "s3"], ledger=ledger)
+
+    assert summary["ledger_path"] == "/tmp/source_independence.json"
+
+
 def test_committed_source_ledger_json_is_valid():
     with open("config/source_independence_ledger.json") as fh:
         payload = json.load(fh)

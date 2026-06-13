@@ -466,8 +466,8 @@ function ForecastChartCard({
         <TrajectoryChart
           curve={model.curve}
           accent={model.accent}
-          hStarQ05={hStarQ05 ?? 4}
-          hStarQ95={hStarQ95 ?? 6}
+          hStarQ05={hStarQ05 ?? hStar ?? 0}
+          hStarQ95={hStarQ95 ?? hStar ?? 0}
         />
         {theoremFail && !sbcFail && (
           <div className="absolute inset-0 z-30 flex items-center justify-center rounded-lg bg-[#020617]/90 backdrop-blur-sm">
