@@ -63,12 +63,13 @@ def histogram_diagnostics(
     Returns
     -------
     dict with:
-      chi_squared       float   χ² statistic vs expected uniform bin counts
+      chi_squared       float   χ² statistic vs expected uniform rank support
       chi_squared_p     float   p-value (χ² CDF, dof = n_bins - 1)
       histogram_shape   str     "uniform" | "U_shaped" | "center_clustered" | "skew"
       bin_counts        list[int]
     """
-    if ranks.size < n_bins:
+    rank_support = n_draws_per_fit + 1
+    if ranks.size < n_bins or rank_support < n_bins:
         return {
             "chi_squared": float("nan"),
             "chi_squared_p": float("nan"),
@@ -76,10 +77,18 @@ def histogram_diagnostics(
             "bin_counts": [],
         }
 
-    counts, _ = np.histogram(ranks, bins=n_bins, range=(0, n_draws_per_fit))
-    expected = ranks.size / n_bins
+    rank_values = np.arange(rank_support)
+    support_bins = np.floor(rank_values * n_bins / rank_support).astype(int)
+    support_bins = np.clip(support_bins, 0, n_bins - 1)
+    expected = np.bincount(support_bins, minlength=n_bins).astype(float)
+    expected *= ranks.size / rank_support
 
-    # χ² against uniform
+    rank_bins = np.floor(np.asarray(ranks) * n_bins / rank_support).astype(int)
+    rank_bins = np.clip(rank_bins, 0, n_bins - 1)
+    counts = np.bincount(rank_bins, minlength=n_bins).astype(int)
+
+    # χ² against the discrete uniform rank support. Equal expected bin counts
+    # are valid only when n_bins divides n_draws_per_fit + 1.
     chi2 = float(np.sum((counts - expected) ** 2 / expected))
     chi2_p = float(sp_stats.chi2.sf(chi2, df=n_bins - 1))
 
@@ -91,9 +100,12 @@ def histogram_diagnostics(
     center_count     = int(counts[n_edge:-n_edge].sum())
     n_center_bins    = n_bins - 2 * n_edge
 
-    left_rate   = left_edge_count  / (n_edge * expected)
-    right_rate  = right_edge_count / (n_edge * expected)
-    centre_rate = center_count     / (n_center_bins * expected)
+    expected_left = float(expected[:n_edge].sum())
+    expected_right = float(expected[-n_edge:].sum())
+    expected_center = float(expected[n_edge:-n_edge].sum())
+    left_rate   = left_edge_count  / expected_left
+    right_rate  = right_edge_count / expected_right
+    centre_rate = center_count     / expected_center
 
     # Classification:
     # U_shaped         — BOTH edge bands are dense: posterior under-dispersed /
