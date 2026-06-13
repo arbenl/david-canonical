@@ -359,11 +359,13 @@ def test_sbc_guard_passes_when_sbc_passed_none(tmp_path):
     _sbc_guard(tmp_path)  # must not raise
 
 
-def test_emit_forecasts_raises_sbc_fail(tmp_path):
-    """emit_forecasts raises SbcFail when the ledger records sbc_passed=False."""
+@pytest.mark.parametrize("ledger_location", ["forecast_dir", "fit_dir"])
+def test_emit_forecasts_raises_sbc_fail(tmp_path, ledger_location):
+    """emit_forecasts checks both possible falsification ledger placements."""
     from david.engine.forecast import emit_forecasts
 
-    # Build a falsification ledger with a failed SBC block
+    # Build a falsification ledger with a failed SBC block. In weekly order,
+    # falsify runs before forecast and writes this under fit_dir.
     forecast_run_dir = tmp_path / "forecasts" / "run_test"
     ledger = {
         "sbc_block": {
@@ -373,7 +375,6 @@ def test_emit_forecasts_raises_sbc_fail(tmp_path):
         }
     }
     forecast_run_dir.mkdir(parents=True, exist_ok=True)
-    (forecast_run_dir / "falsification_ledger.json").write_text(json.dumps(ledger))
 
     # Construct a minimal passing fit_dir with a fit_summary.json
     fit_dir = tmp_path / "fits" / "run_test"
@@ -383,6 +384,8 @@ def test_emit_forecasts_raises_sbc_fail(tmp_path):
         "gate_status": "pass",
         "timestamp": "2026-06-12T00:00:00Z",
     }))
+    ledger_dir = forecast_run_dir if ledger_location == "forecast_dir" else fit_dir
+    (ledger_dir / "falsification_ledger.json").write_text(json.dumps(ledger))
 
     with (
         patch("david.engine.forecast.FORECASTS_DIR", tmp_path / "forecasts"),
