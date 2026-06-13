@@ -68,10 +68,10 @@ const NODES: NodeDef[] = [
     formula: "rank(θ₀) ~ Uniform{0,…,L}",
   },
   {
-    id: "router", title: "7 · Forecast Router", sub: "Parashikimi i certifikuar", x: 238, y: 196,
+    id: "router", title: "7 · Forecast Router", sub: "Rrugëzim me porta", x: 238, y: 196,
     detailTitle: "Rrugëzuesi i parashikimit",
     detailBody:
-      "Vetëm kur SBC dhe teoremat kalojnë, qelizat e parashikimit (p_active me intervale 80%/95%) zhbllokohen për horizonte 1–24 muaj dhe shfaqet vula: «Parashikim i Certifikuar Matematikisht».",
+      "Vetëm kur SBC dhe portat përkatëse kalojnë, qelizat e parashikimit (p_active me intervale 80%/95%) zhbllokohen për horizontet e lejuara. Qelizat e tjera ruhen me route code dhe arsye bllokuese në route ledger.",
   },
 ];
 
@@ -111,10 +111,6 @@ export function RoadmapDiagram({ statuses }: Readonly<{ statuses: RoadmapStatuse
             <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
               <path d="M0,0 L8,3 L0,6 Z" fill="#475569" />
             </marker>
-            <filter id="node-glow" x="-30%" y="-30%" width="160%" height="160%">
-              <feGaussianBlur stdDeviation="3" result="b" />
-              <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
-            </filter>
           </defs>
 
           {/* edges */}
@@ -148,13 +144,12 @@ export function RoadmapDiagram({ statuses }: Readonly<{ statuses: RoadmapStatuse
                 style={{ cursor: "pointer" }}
               >
                 <rect
-                  x={n.x} y={n.y} width={NW} height={NH} rx={12}
+                  x={n.x} y={n.y} width={NW} height={NH} rx={8}
                   fill={STATUS_FILL[st]} stroke={STATUS_STROKE[st]}
                   strokeWidth={active ? 2.5 : 1.5}
-                  filter={active ? "url(#node-glow)" : undefined}
                   opacity={active ? 1 : 0.92}
                 />
-                <circle cx={n.x + 16} cy={n.y + 16} r="4" fill={STATUS_STROKE[st]} filter="url(#node-glow)" />
+                <circle cx={n.x + 16} cy={n.y + 16} r="4" fill={STATUS_STROKE[st]} />
                 <text x={n.x + 30} y={n.y + 21} fill="#e2e8f0" fontSize="13" fontWeight="600">{n.title}</text>
                 <text x={n.x + 16} y={n.y + 44} fill="#94a3b8" fontSize="11">{n.sub}</text>
                 <text x={n.x + 16} y={n.y + 62} fill={STATUS_STROKE[st]} fontSize="10" fontWeight="700" style={{ textTransform: "uppercase" }}>

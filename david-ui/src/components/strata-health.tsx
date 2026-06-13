@@ -4,14 +4,6 @@ import Link from "next/link";
 /** Adjudicated-item floor for Bayesian fit reliability. */
 const MIN_FOR_FIT = 3;
 
-/** Country code → flag emoji lookup. */
-const FLAGS: Record<string, string> = {
-  XK: "🇽🇰", AL: "🇦🇱", MK: "🇲🇰", RS: "🇷🇸", BA: "🇧🇦", ME: "🇲🇪",
-  NL: "🇳🇱", IE: "🇮🇪", SE: "🇸🇪", TR: "🇹🇷", HR: "🇭🇷", SI: "🇸🇮",
-  HU: "🇭🇺", PL: "🇵🇱", RO: "🇷🇴", BG: "🇧🇬", DE: "🇩🇪", FR: "🇫🇷",
-  GB: "🇬🇧", EU: "🇪🇺",
-};
-
 type HealthLevel = "ready" | "partial" | "uncoded" | "empty";
 
 function healthOf(s: Stratum): HealthLevel {
@@ -74,7 +66,7 @@ export function StrataHealth({ strata }: Props) {
           const adjBarWidth = s.n_evidence > 0
             ? Math.round((s.n_adjudicated / s.n_evidence) * 100)
             : 0;
-          const flag = FLAGS[s.country.toUpperCase()] ?? "🌐";
+          const country = s.country.toUpperCase();
           const policy = s.policy.replace(/_/g, " ");
 
           return (
@@ -88,9 +80,11 @@ export function StrataHealth({ strata }: Props) {
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <span>{flag}</span>
+                    <span className="numeric rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[9px] text-slate-400">
+                      {country}
+                    </span>
                     <span className="text-xs font-semibold text-slate-300 truncate">
-                      {s.country.toUpperCase()}
+                      {country}
                     </span>
                     <span className="text-[10px] text-slate-600">·</span>
                     <span className="text-[10px] text-slate-500 truncate capitalize">{policy}</span>

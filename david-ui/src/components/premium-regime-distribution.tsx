@@ -16,19 +16,19 @@ export function PremiumRegimeDistribution() {
       <div className="grid grid-cols-4 gap-4 mb-4">
         <div className="border-l-2 border-emerald-500 pl-2">
           <p className="text-[9px] text-slate-500 uppercase">BULLISH</p>
-          <p className="text-sm font-bold text-emerald-400 neon-green">45%</p>
+          <p className="numeric text-sm font-bold text-emerald-400">45%</p>
         </div>
         <div className="border-l-2 border-orange-500 pl-2">
           <p className="text-[9px] text-slate-500 uppercase">BEARISH</p>
-          <p className="text-sm font-bold text-orange-400">15%</p>
+          <p className="numeric text-sm font-bold text-orange-400">15%</p>
         </div>
         <div className="border-l-2 border-pink-500 pl-2">
           <p className="text-[9px] text-slate-500 uppercase">VOLATILE</p>
-          <p className="text-sm font-bold text-pink-400 neon-rose">25%</p>
+          <p className="numeric text-sm font-bold text-pink-400">25%</p>
         </div>
         <div className="border-l-2 border-cyan-500 pl-2">
           <p className="text-[9px] text-slate-500 uppercase">STABLE</p>
-          <p className="text-sm font-bold text-cyan-400 neon-cyan">15%</p>
+          <p className="numeric text-sm font-bold text-cyan-400">15%</p>
         </div>
       </div>
 
