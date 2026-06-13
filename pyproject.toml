@@ -23,7 +23,7 @@ dependencies = [
     "uvicorn[standard]>=0.29",
     "typer>=0.12",
     "rich>=13.7",
-    "anthropic>=0.30",
+    "anthropic>=0.109.1",
     "groq>=0.8",
     "psycopg2-binary>=2.9",
     "arviz>=0.23.4",
@@ -35,12 +35,12 @@ dev = [
     "pytest-cov>=5.0",
     "hypothesis>=6.100",
     "mypy>=1.10",
-    "ruff>=0.4",
+    "ruff>=0.15.17",
 ]
 llm = [
     # Plug in whichever providers you use
-    "anthropic>=0.30",
-    "openai>=1.30",
+    "anthropic>=0.109.1",
+    "openai>=2.41.1",
 ]
 
 [project.scripts]
