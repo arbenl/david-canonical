@@ -110,7 +110,7 @@ def _build_sbc_block() -> dict[str, Any]:
         for v in per_param.values()
         if isinstance(v, dict)
         and isinstance(v.get("pvalue"), float)
-        and not (v["pvalue"] != v["pvalue"])
+        and not np.isnan(v["pvalue"])
     ]
     worst_p = min(p_values) if p_values else None
     failed  = sbc.get("failed_parameters", [])
