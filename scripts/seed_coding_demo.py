@@ -17,8 +17,6 @@ import sys
 from datetime import timezone, datetime
 from pathlib import Path
 
-import numpy as np
-
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from david.config import (
@@ -29,8 +27,6 @@ from david.config import (
     TACTIC_CLASSES,
 )
 from david.ingest.normalize import is_tobacco_relevant
-
-DEMO_NOISE_RNG = np.random.default_rng(42)
 
 # ── find latest normalized file ───────────────────────────────────────────────
 norm_dir = DATA_ROOT / "raw_normalized"
@@ -76,9 +72,11 @@ def true_label(item: dict, tactic: str) -> int:
     return 0
 
 
-def noisy_label(true_y: int, accuracy: float) -> int:
+def noisy_label(true_y: int, accuracy: float, noise_key: str) -> int:
     """Flip with probability (1 - accuracy) for deterministic demo data only."""
-    if DEMO_NOISE_RNG.random() < accuracy:
+    weighted_sum = sum((idx + 1) * ord(ch) for idx, ch in enumerate(noise_key))
+    bucket = (weighted_sum % 10_000) / 10_000
+    if bucket < accuracy:
         return true_y
     return 1 - true_y
 
@@ -94,7 +92,8 @@ with out_path.open("w") as f:
         for item in items:
             for k in TACTIC_CLASSES:
                 y_true = true_label(item, k)
-                y = noisy_label(y_true, coder["accuracy"])
+                noise_key = f"{item['evidence_id']}|{coder['coder_id']}|{k}"
+                y = noisy_label(y_true, coder["accuracy"], noise_key)
                 rec = {
                     "evidence_id": item["evidence_id"],
                     "coder_id": coder["coder_id"],

@@ -32,6 +32,6 @@ jobs:
           To enable this workflow later:
 
           1. Enable code scanning / GitHub Advanced Security for the repository.
-          2. Add a CodeQL analysis job with the required job-level
-             `security-events: write` permission.
+          2. Add a CodeQL analysis job with only the job-level permissions
+             required by GitHub's CodeQL upload action.
           MD
