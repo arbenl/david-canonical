@@ -1,4 +1,4 @@
-import { getSbc, getFitRuns, getFitSummary, getForecastCells } from "@/lib/data";
+import { getSbc, getFitRuns, getFitSummary, getForecastCells, getRouteLedger } from "@/lib/data";
 import type { ForecastCell } from "@/lib/api";
 import { ForecastRouter, type CurvePoint } from "@/components/forecast-router";
 import { ApproveButton } from "@/components/approve-button";
@@ -8,6 +8,76 @@ export const dynamic = "force-dynamic";
 const ACTIVE_STRATUM = "xk_general";
 
 function clamp01(v: number) { return Math.max(0.01, Math.min(0.99, v)); }
+
+type RawLedgerCell = Partial<ForecastCell> & {
+  cell?: { stratum_id?: string; series?: number; tactic?: number };
+  credible_interval_80?: [number, number];
+  credible_interval_95?: [number, number];
+  horizon_validity?: {
+    h_star_months?: number;
+    below_h_star?: boolean;
+    forecast_route?: ForecastCell["forecast_route"];
+  };
+};
+
+function finite(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+function text(v: unknown): string | null {
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+function theoremNumber(
+  summary: Awaited<ReturnType<typeof getFitSummary>>,
+  theoremName: string,
+  fieldName: string,
+): number | null {
+  const block = summary?.theorems?.[theoremName] as Record<string, unknown> | undefined;
+  return finite(block?.[fieldName]);
+}
+
+function normalizeLedgerCell(raw: RawLedgerCell): ForecastCell | null {
+  const series = finite(raw.series) ?? finite(raw.cell?.series);
+  const tactic = finite(raw.tactic) ?? finite(raw.cell?.tactic);
+  const horizon = finite(raw.horizon_months);
+  const pActive = finite(raw.p_active);
+  if (series == null || tactic == null || horizon == null || pActive == null) return null;
+
+  const ci80 = raw.credible_interval_80;
+  const ci95 = raw.credible_interval_95;
+  const route = text(raw.forecast_route) ?? text(raw.horizon_validity?.forecast_route) ?? "withhold";
+  const hStar = finite(raw.h_star_months) ?? finite(raw.horizon_validity?.h_star_months) ?? horizon;
+  const belowHStar =
+    typeof raw.below_h_star === "boolean"
+      ? raw.below_h_star
+      : typeof raw.horizon_validity?.below_h_star === "boolean"
+        ? raw.horizon_validity.below_h_star
+        : horizon <= hStar;
+
+  return {
+    series,
+    tactic,
+    horizon_months: horizon,
+    p_active: pActive,
+    ci_80_lo: finite(raw.ci_80_lo) ?? finite(ci80?.[0]) ?? pActive,
+    ci_80_hi: finite(raw.ci_80_hi) ?? finite(ci80?.[1]) ?? pActive,
+    ci_95_lo: finite(raw.ci_95_lo) ?? finite(ci95?.[0]) ?? pActive,
+    ci_95_hi: finite(raw.ci_95_hi) ?? finite(ci95?.[1]) ?? pActive,
+    h_star_months: hStar,
+    below_h_star: belowHStar,
+    forecast_route: route as ForecastCell["forecast_route"],
+    stratum_id: text(raw.stratum_id) ?? text(raw.cell?.stratum_id) ?? ACTIVE_STRATUM,
+    emitted_at: text(raw.emitted_at) ?? new Date(0).toISOString(),
+    route_reasons: Array.isArray(raw.route_reasons) ? raw.route_reasons.filter((r): r is string => typeof r === "string") : [],
+    identification_distance_posterior_median: finite(raw.identification_distance_posterior_median) ?? undefined,
+    informativeness_I_O_lower_95: finite(raw.informativeness_I_O_lower_95) ?? undefined,
+    informativeness_n_eff_i2: finite(raw.informativeness_n_eff_i2) ?? undefined,
+    headline_flagged_by_posterior_fdp: raw.headline_flagged_by_posterior_fdp,
+    headline_flagged_by_exceedance_gate: raw.headline_flagged_by_exceedance_gate,
+    fdp_binding_reason: raw.fdp_binding_reason,
+  };
+}
 
 /** Group the active stratum's cells by horizon and build a CI curve over horizon. */
 function buildCurve(cells: ForecastCell[]): CurvePoint[] | null {
@@ -58,12 +128,21 @@ export default async function ForecastRouterPage() {
   let hStarQ95: number | null = null;
   let cells: ForecastCell[] = [];
   let runId: string | null = null;
+  let dTheta: number | null = null;
+  let dThetaFloor: number | null = null;
+  let iLower95: number | null = null;
+  let iLower95Floor: number | null = null;
+  let nEffI2: number | null = null;
+  let nEffI2Floor: number | null = null;
+  let routeCounts: Record<string, number> | null = null;
+  let routeTimestamp: string | null = null;
 
   if (latestRun) {
     runId = latestRun.run_id;
-    const [summary, cellsRes] = await Promise.all([
+    const [summary, cellsRes, ledger] = await Promise.all([
       getFitSummary(latestRun.run_id),
       getForecastCells(latestRun.run_id),
+      getRouteLedger(latestRun.run_id),
     ]);
     if (summary) {
       const th = summary.theorems ?? {};
@@ -77,8 +156,19 @@ export default async function ForecastRouterPage() {
       const hq95 = theorem("D_prime").h_star_q95;
       if (typeof hq05 === "number") hStarQ05 = hq05;
       if (typeof hq95 === "number") hStarQ95 = hq95;
+      dTheta = theoremNumber(summary, "A_prime", "median_d_theta");
+      dThetaFloor = theoremNumber(summary, "A_prime", "floor");
+      iLower95 = theoremNumber(summary, "B_prime", "lower_95_I_worst_source");
+      iLower95Floor = theoremNumber(summary, "B_prime", "floor");
+      nEffI2 = theoremNumber(summary, "B_prime", "n_eff_i2");
+      nEffI2Floor = theoremNumber(summary, "B_prime", "n_eff_i2_floor");
     }
-    cells = cellsRes.forecast_cells ?? [];
+    routeCounts = ledger?.route_counts ?? null;
+    routeTimestamp = ledger?.timestamp ?? null;
+    const ledgerCells = Array.isArray(ledger?.cells)
+      ? (ledger.cells as RawLedgerCell[]).map(normalizeLedgerCell).filter((c): c is ForecastCell => c != null)
+      : [];
+    cells = ledgerCells.length ? ledgerCells : (cellsRes.forecast_cells ?? []);
   }
 
   // Prefer the active stratum's cells; fall back to all cells.
@@ -89,8 +179,12 @@ export default async function ForecastRouterPage() {
   const realProbability = usedCells.length
     ? clamp01(usedCells.reduce((s, c) => s + (c.p_active ?? 0), 0) / usedCells.length)
     : null;
+  const firstCell = usedCells[0];
+  dTheta = finite(firstCell?.identification_distance_posterior_median) ?? dTheta;
+  iLower95 = finite(firstCell?.informativeness_I_O_lower_95) ?? iLower95;
+  nEffI2 = finite(firstCell?.informativeness_n_eff_i2) ?? nEffI2;
 
-  // Fail-closed: only lock on an explicit "fail"; unknown/skip → demo (not certified, not locked).
+  // Fail-closed: only lock on an explicit "fail"; unknown/skip remains visible as demo/unknown state.
   const sbcFail =
     sbc?.measurement?.gate_status === "fail" || sbc?.forecast?.gate_status === "fail";
   const theoremFail = aPrime === "fail" || bPrime === "fail";
@@ -108,6 +202,16 @@ export default async function ForecastRouterPage() {
         bPrime={bPrime}
         activeStratum={ACTIVE_STRATUM}
         runId={runId}
+        activeRoute={firstCell?.forecast_route ?? null}
+        routeReasons={firstCell?.route_reasons ?? []}
+        routeCounts={routeCounts}
+        routeTimestamp={routeTimestamp}
+        dTheta={dTheta}
+        dThetaFloor={dThetaFloor}
+        iLower95={iLower95}
+        iLower95Floor={iLower95Floor}
+        nEffI2={nEffI2}
+        nEffI2Floor={nEffI2Floor}
         hStar={hStar}
         hStarQ05={hStarQ05}
         hStarQ95={hStarQ95}
@@ -117,7 +221,7 @@ export default async function ForecastRouterPage() {
 
       {/* Route ledger sign-off — required by Automation Contract before headline promotion */}
       {runId && (
-        <section className="rounded-xl border border-slate-700/60 bg-slate-800/40 p-5">
+        <section className="console-panel p-5">
           <div className="flex items-center justify-between gap-4">
             <div>
               <h2 className="text-sm font-semibold text-slate-200">Route Ledger Sign-off</h2>

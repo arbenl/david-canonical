@@ -133,10 +133,6 @@ export function TrajectoryChart({
     <svg viewBox={`0 0 ${W} ${H}`} className="h-full w-full" preserveAspectRatio="none"
       role="img" aria-label="Forecast trajectory with FG5 prior-dominated grey-out">
       <defs>
-        <filter id={gid}>
-          <feGaussianBlur stdDeviation="3" result="b" />
-          <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
-        </filter>
         <linearGradient id={`${gid}-fill`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={accent} stopOpacity="0.3" />
           <stop offset="100%" stopColor={accent} stopOpacity="0.02" />
@@ -185,14 +181,13 @@ export function TrajectoryChart({
             initial={{ pathLength: 0 }}
             animate={{ pathLength: 1 }}
             transition={{ duration: 0.8, ease: "easeOut", delay: 0.3 }}
-            d={midPath(condCurve)} fill="none" stroke={accent} strokeWidth="2.2"
-            filter={`url(#${gid})`} />
+            d={midPath(condCurve)} fill="none" stroke={accent} strokeWidth="2.2" />
           <motion.circle
             initial={{ scale: 0, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ type: "spring", bounce: 0.5, delay: 1.1 }}
             cx={sx(condCurve.at(-1)!.x)} cy={sy(condCurve.at(-1)!.mid)}
-            r="3" fill={accent} filter={`url(#${gid})`} />
+            r="3" fill={accent} />
         </>
       )}
 

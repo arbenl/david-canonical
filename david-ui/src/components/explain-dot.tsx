@@ -49,7 +49,7 @@ export function ExplainDot({ title, body, formula, side = "right" }: Props) {
                      p-4 text-left shadow-2xl shadow-sky-900/40 ring-1 ring-sky-500/10`}
         >
           <span className="mb-1 flex items-center gap-2">
-            <span className="text-base leading-none">🇦🇱</span>
+            <span className="numeric rounded border border-sky-700/60 bg-sky-950/50 px-1.5 py-0.5 text-[10px] text-sky-300">SQ</span>
             <span className="text-sm font-bold text-sky-300">{title}</span>
           </span>
           <span className="block text-xs leading-relaxed text-slate-300">{body}</span>

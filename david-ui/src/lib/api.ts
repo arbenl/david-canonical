@@ -62,6 +62,12 @@ export interface ForecastCell {
   emitted_at: string;
   /** Route reasons produced by router.py gate stack. */
   route_reasons?: string[];
+  /** FG2: d(theta) median recorded on route_ledger cells. */
+  identification_distance_posterior_median?: number;
+  /** FG3: I(O) lower credible bound recorded on route_ledger cells. */
+  informativeness_I_O_lower_95?: number;
+  /** FG3: dependence-adjusted N_eff * I^2 recorded on route_ledger cells. */
+  informativeness_n_eff_i2?: number;
   /** C-7: set on eligible cells after FDP expectation gate. */
   headline_flagged_by_posterior_fdp?: boolean;
   /** C-7: set on eligible cells after FG6 exceedance gate. */
