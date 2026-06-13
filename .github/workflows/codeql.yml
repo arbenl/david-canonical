@@ -32,34 +32,6 @@ jobs:
           To enable this workflow later:
 
           1. Enable code scanning / GitHub Advanced Security for the repository.
-          2. Set repository variable `CODEQL_ENABLED=true`.
+          2. Add a CodeQL analysis job with the required job-level
+             `security-events: write` permission.
           MD
-
-  analyze:
-    name: CodeQL (${{ matrix.language }})
-    if: vars.CODEQL_ENABLED == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      actions: read
-      contents: read
-      security-events: write
-    strategy:
-      fail-fast: false
-      matrix:
-        language: [python, javascript-typescript]
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
-        with:
-          languages: ${{ matrix.language }}
-          queries: security-extended,security-and-quality
-
-      - name: Analyze
-        uses: github/codeql-action/analyze@v4
-        with:
-          category: "/language:${{ matrix.language }}"
