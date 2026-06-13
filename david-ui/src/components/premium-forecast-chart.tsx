@@ -1,3 +1,5 @@
+"use client";
+
 /**
  * E-2: FG5 mathematical grey-out — standalone trajectory chart.
  *
@@ -15,6 +17,7 @@
 
 import type { CurvePoint } from "@/components/forecast-router";
 import { type RouteState, routeAccent, assertNever } from "@/lib/route-state";
+import { motion } from "framer-motion";
 
 // ── Deterministic demo data (SSR-stable, no Math.random) ──────────────────────
 
@@ -69,7 +72,7 @@ const W = 480, H = 160, PAD = 12;
 
 // ── SVG chart implementation ───────────────────────────────────────────────────
 
-function TrajectoryChart({
+export function TrajectoryChart({
   curve,
   hStarQ05,
   hStarQ95,
@@ -164,15 +167,31 @@ function TrajectoryChart({
       ) : null)}
 
       {/* ── Conditional forecast (h ≤ h*) ─────────────────────────────────── */}
-      <path d={bandPath(condCurve, "lo95", "hi95")} fill={accent} fillOpacity="0.08"
+      <motion.path
+        initial={{ pathLength: 0, opacity: 0 }}
+        animate={{ pathLength: 1, opacity: 0.08 }}
+        transition={{ duration: 0.8, ease: "easeOut", delay: 0.1 }}
+        d={bandPath(condCurve, "lo95", "hi95")} fill={accent}
         stroke={accent} strokeOpacity="0.15" strokeWidth="1" />
-      <path d={bandPath(condCurve, "lo80", "hi80")} fill={`url(#${gid}-fill)`}
+      <motion.path
+        initial={{ pathLength: 0, opacity: 0 }}
+        animate={{ pathLength: 1, opacity: 1 }}
+        transition={{ duration: 0.8, ease: "easeOut", delay: 0.2 }}
+        d={bandPath(condCurve, "lo80", "hi80")} fill={`url(#${gid}-fill)`}
         stroke={accent} strokeOpacity="0.45" strokeWidth="1" />
       {condCurve.length > 1 && (
         <>
-          <path d={midPath(condCurve)} fill="none" stroke={accent} strokeWidth="2.2"
+          <motion.path
+            initial={{ pathLength: 0 }}
+            animate={{ pathLength: 1 }}
+            transition={{ duration: 0.8, ease: "easeOut", delay: 0.3 }}
+            d={midPath(condCurve)} fill="none" stroke={accent} strokeWidth="2.2"
             filter={`url(#${gid})`} />
-          <circle cx={sx(condCurve.at(-1)!.x)} cy={sy(condCurve.at(-1)!.mid)}
+          <motion.circle
+            initial={{ scale: 0, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: "spring", bounce: 0.5, delay: 1.1 }}
+            cx={sx(condCurve.at(-1)!.x)} cy={sy(condCurve.at(-1)!.mid)}
             r="3" fill={accent} filter={`url(#${gid})`} />
         </>
       )}
@@ -210,14 +229,18 @@ function TrajectoryChart({
 
       {/* ── Prior-dominated π∞ band (h > h*) — desaturated grey ──────────── */}
       {priorCurve.length > 0 && (
-        <g opacity="0.60">
+        <motion.g
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 0.60 }}
+          transition={{ duration: 0.6, delay: 1.2 }}
+        >
           <path d={bandPath(priorCurve, "lo80", "hi80")}
             fill="#475569" fillOpacity="0.20" stroke="#475569" strokeOpacity="0.30" strokeWidth="1" />
           <path d={bandPath(priorCurve, "lo95", "hi95")}
             fill="none" stroke="#334155" strokeOpacity="0.35" strokeWidth="1" strokeDasharray="2 4" />
           <text x={sx(priorCurve[0].x) + 6} y={H - PAD - 4}
             fill="#64748b" fontSize="8" fontFamily="monospace">π∞ prior band</text>
-        </g>
+        </motion.g>
       )}
     </svg>
   );

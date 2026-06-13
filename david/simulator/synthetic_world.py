@@ -92,6 +92,7 @@ def sample_world(prior: HyperPrior, seed: int | None = None) -> WorldDraw:
     j_observability = rng.normal(0.0, 0.5, size=S)
     kappa_plus = 0.5 + 0.5 * _logistic(rng.normal(1.0, 0.5, size=M))   # synced to Stan: normal(1,0.5) mean kappa≈0.87
     kappa_minus = 0.5 + 0.5 * _logistic(rng.normal(1.0, 0.5, size=M))  # reverted: lower kappa↑Y-rate when P(b0)>P(b1)
+    coder_common_mode_weight = rng.beta(1.0, 9.0)  # synced to Stan: common-mode coder dependence
     # init: softmax of normal(0,1) — same as Stan's log_softmax(init_raw)
     init_raw = rng.normal(0.0, 1.0, size=L)
     init = _softmax(init_raw)
@@ -104,6 +105,7 @@ def sample_world(prior: HyperPrior, seed: int | None = None) -> WorldDraw:
         "delta_raw": delta_raw, "j_raw": j_raw,
         "delta_observability": delta_observability, "j_observability": j_observability,
         "kappa_plus": kappa_plus, "kappa_minus": kappa_minus,
+        "coder_common_mode_weight": coder_common_mode_weight,
         "init": init,
         "selection_alpha": selection_alpha,
         "selection_observability": selection_observability,
@@ -161,9 +163,20 @@ def sample_world(prior: HyperPrior, seed: int | None = None) -> WorldDraw:
                 b[r, tt, k] = (rng.uniform(size=S) < p_detect).astype(int)
                 for s in range(S):
                     if b[r, tt, k, s] == 1:
-                        y[r, tt, k, s] = (rng.uniform(size=M) < kappa_plus).astype(int)
+                        if rng.uniform() < coder_common_mode_weight:
+                            common_p = float(kappa_plus.mean())
+                            common_y = int(rng.uniform() < common_p)
+                            y[r, tt, k, s] = common_y
+                        else:
+                            y[r, tt, k, s] = (rng.uniform(size=M) < kappa_plus).astype(int)
                     else:
-                        y[r, tt, k, s] = (rng.uniform(size=M) < (1 - kappa_minus)).astype(int)
+                        false_positive_p = 1 - kappa_minus
+                        if rng.uniform() < coder_common_mode_weight:
+                            common_p = float(false_positive_p.mean())
+                            common_y = int(rng.uniform() < common_p)
+                            y[r, tt, k, s] = common_y
+                        else:
+                            y[r, tt, k, s] = (rng.uniform(size=M) < false_positive_p).astype(int)
                 # Per-unit selection: each (r, t, k) is independently selected.
                 # Stan's likelihood counts selected[u] once per unit u=(r,t,k),
                 # with the logit depending on whether THIS tactic is active.

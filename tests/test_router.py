@@ -41,6 +41,7 @@ def _cell(
     info_lower95: float = 0.20,   # FG3 I-floor = 0.10; values < 0.10 fail
     n_eff_i2: float = 5.0,        # FG3 N_eff·I² floor = 3.0; values < 3.0 fail
     below_h_star: bool = True,    # FG5; False → horizon_prior_dominated
+    prior_sensitive: bool = False,
     lambda_lo: float = 0.40,      # FG6 width = hi-lo; > 0.20 fails
     lambda_hi: float = 0.60,
     cell_id: str = "cell",
@@ -48,10 +49,22 @@ def _cell(
     return {
         "cell_id": cell_id,
         "p_active": p_active,
+        "source_independence": {
+            "gate_status": "pass",
+            "reason": "structural_source_independence_above_floor",
+            "structural_s_eff": 3.4,
+            "floor": 3.0,
+            "missing_pair_keys": [],
+        },
         "identification_distance_posterior_median": id_dist,
         "informativeness_I_O_lower_95": info_lower95,
         "informativeness_n_eff_i2": n_eff_i2,
-        "horizon_validity": {"below_h_star": below_h_star},
+        "horizon_validity": {
+            "below_h_star": below_h_star,
+            "prior_sensitivity": {
+                "route_changes_at_horizon": prior_sensitive,
+            },
+        },
         "lambda_endogenous_bounds": [lambda_lo, lambda_hi],
     }
 
@@ -187,6 +200,103 @@ def test_all_non_headline_routes_excluded_from_p_hat(tmp_path):
     assert ledger["route_counts"]["horizon_prior_dominated"] == 1
     assert ledger["route_counts"]["monitor_only"] == 1
     assert ledger["route_counts"]["headline"] == 1
+
+
+def test_missing_n_eff_i2_routes_prior_dominated(tmp_path):
+    """FG3 condition 2 is fail-closed: missing N_eff·I² cannot pass."""
+    c_missing = _cell(p_active=0.99, cell_id="missing_n_eff")
+    c_missing.pop("informativeness_n_eff_i2")
+    c_headline = _cell(p_active=0.80, cell_id="headline")
+
+    ledger, captured = _run_router([c_missing, c_headline], tmp_path)
+
+    missing_in_ledger = next(c for c in ledger["cells"] if c["cell_id"] == "missing_n_eff")
+    assert missing_in_ledger["forecast_route"] == "prior_dominated"
+    assert "FG3_N_eff_I2_missing" in missing_in_ledger["route_reasons"]
+    assert captured
+    assert c_missing["p_active"] not in captured[0]
+
+
+def test_missing_source_independence_routes_evidence_gap(tmp_path):
+    """FG2 must fail closed when structural source-independence evidence is absent."""
+    c_missing = _cell(p_active=0.99, cell_id="missing_source_independence")
+    c_missing.pop("source_independence")
+    c_headline = _cell(p_active=0.80, cell_id="headline")
+
+    ledger, captured = _run_router([c_missing, c_headline], tmp_path)
+
+    missing_in_ledger = next(
+        c for c in ledger["cells"] if c["cell_id"] == "missing_source_independence"
+    )
+    assert missing_in_ledger["forecast_route"] == "evidence_gap"
+    assert "FG2_source_independence_missing" in missing_in_ledger["route_reasons"]
+    assert captured
+    assert c_missing["p_active"] not in captured[0]
+
+
+def test_low_structural_s_eff_routes_evidence_gap(tmp_path):
+    """FG2 includes the structural S_eff/Kruskal source floor, not only d(theta)."""
+    c_low = _cell(p_active=0.99, cell_id="low_s_eff")
+    c_low["source_independence"] = {
+        "gate_status": "fail",
+        "reason": "structural_s_eff_2.400_below_floor_3.000",
+        "structural_s_eff": 2.4,
+        "floor": 3.0,
+        "missing_pair_keys": [],
+    }
+    c_headline = _cell(p_active=0.80, cell_id="headline")
+
+    ledger, captured = _run_router([c_low, c_headline], tmp_path)
+
+    low_in_ledger = next(c for c in ledger["cells"] if c["cell_id"] == "low_s_eff")
+    assert low_in_ledger["forecast_route"] == "evidence_gap"
+    assert (
+        "FG2_structural_source_independence:structural_s_eff_2.400_below_floor_3.000"
+        in low_in_ledger["route_reasons"]
+    )
+    assert captured
+    assert c_low["p_active"] not in captured[0]
+
+
+def test_h_star_prior_sensitivity_routes_monitor_only(tmp_path):
+    """P6: if ±1 SD dwell-prior perturbation changes h* route, no headline."""
+    c_sensitive = _cell(
+        p_active=0.96,
+        cell_id="prior_sensitive_horizon",
+        prior_sensitive=True,
+    )
+    c_headline = _cell(p_active=0.82, cell_id="headline")
+
+    ledger, captured = _run_router([c_sensitive, c_headline], tmp_path)
+
+    sensitive_in_ledger = next(
+        c for c in ledger["cells"] if c["cell_id"] == "prior_sensitive_horizon"
+    )
+    assert sensitive_in_ledger["forecast_route"] == "monitor_only"
+    assert "FG5_h_star_prior_sensitive" in sensitive_in_ledger["route_reasons"]
+    assert captured
+    assert c_sensitive["p_active"] not in captured[0]
+    assert ledger["route_counts"]["monitor_only"] == 1
+    assert ledger["h_star_prior_sensitivity"]["n_cells_prior_sensitive"] == 1
+    assert "prior_sensitive_horizon" in ledger["h_star_prior_sensitivity"]["prior_sensitive_cells"]
+
+
+def test_missing_h_star_prior_sensitivity_routes_monitor_only(tmp_path):
+    """P6 sensitivity evidence is mandatory for headline eligibility."""
+    c_missing = _cell(p_active=0.96, cell_id="missing_prior_sensitivity")
+    c_missing["horizon_validity"].pop("prior_sensitivity")
+    c_headline = _cell(p_active=0.82, cell_id="headline")
+
+    ledger, captured = _run_router([c_missing, c_headline], tmp_path)
+
+    missing_in_ledger = next(
+        c for c in ledger["cells"] if c["cell_id"] == "missing_prior_sensitivity"
+    )
+    assert missing_in_ledger["forecast_route"] == "monitor_only"
+    assert "FG5_h_star_prior_sensitivity_missing" in missing_in_ledger["route_reasons"]
+    assert captured
+    assert c_missing["p_active"] not in captured[0]
+    assert ledger["h_star_prior_sensitivity"]["n_cells_missing_sensitivity"] == 1
 
 
 # ---------------------------------------------------------------------------

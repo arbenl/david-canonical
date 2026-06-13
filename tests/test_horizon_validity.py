@@ -6,6 +6,8 @@ import numpy as np
 
 from david.theorems.D_forecast_horizon import (
     first_crossing_h_star,
+    forecast_regime_distribution,
+    horizon_validity_from_z_future_draws,
     stationary_marginal_embedded,
     stationary_marginal_time,
     horizon_validity,
@@ -74,6 +76,15 @@ def test_first_crossing_immediate_crossing_yields_zero():
     assert first_crossing_h_star(curve, tau=0.5, h_max=3) == 0
 
 
+def test_forecast_regime_distribution_uses_stationary_residual_at_origin():
+    # lambda = 0 => dwell mean mu = 1, so the stationary residual is always 1.
+    # Under the Stan GQ semantics, horizon 1 therefore transitions immediately.
+    Pi = np.array([[0.0, 1.0], [1.0, 0.0]])
+    mu = np.array([1.0, 1.0])
+    p = forecast_regime_distribution(Pi, mu, z_t=0, horizon=1, n_mc=200)
+    assert np.allclose(p, np.array([0.0, 1.0]))
+
+
 def test_horizon_validity_h_star_matches_first_crossing_of_emitted_curve():
     # End-to-end: the h* reported by horizon_validity must equal the
     # first-crossing functional applied to its own emitted drift curve.
@@ -96,3 +107,54 @@ def test_horizon_validity_returns_curve():
     hv = horizon_validity("g_test", Pi, mu, z_t, h_max=6, tau=0.5, n_mc=200)
     assert len(hv.horizon_validity_curve) == 6
     assert hv.h_star_months >= 0
+
+
+def test_horizon_validity_accepts_per_draw_terminal_posterior():
+    Pi = np.array([
+        [[0.0, 1.0], [1.0, 0.0]],
+        [[0.0, 1.0], [1.0, 0.0]],
+    ])
+    mu = np.array([[1.0, 1.0], [1.0, 1.0]])
+    z_t_draws = np.array([[1.0, 0.0], [0.0, 1.0]])
+
+    hv = horizon_validity(
+        "series_terminal",
+        Pi,
+        mu,
+        z_t_draws,
+        h_max=2,
+        tau=0.5,
+        n_mc=20,
+    )
+
+    assert len(hv.horizon_validity_curve) == 2
+    assert hv.h_star_q05 <= hv.h_star_q95
+
+
+def test_horizon_validity_from_z_future_uses_emitted_stan_paths():
+    Pi = np.array([
+        [[0.0, 1.0], [1.0, 0.0]],
+        [[0.0, 1.0], [1.0, 0.0]],
+        [[0.0, 1.0], [1.0, 0.0]],
+        [[0.0, 1.0], [1.0, 0.0]],
+    ])
+    mu = np.ones((4, 2))
+    z_t_draws = np.tile(np.array([[1.0, 0.0]]), (4, 1))
+    # Stan 1-indexed paths: all draws move to regime 2 at h=1, then regime 1.
+    z_future = np.array([[2, 1], [2, 1], [2, 1], [2, 1]])
+
+    hv = horizon_validity_from_z_future_draws(
+        "z_future_series",
+        Pi,
+        mu,
+        z_t_draws,
+        z_future,
+        h_max=2,
+        tau=0.5,
+        n_bootstrap=20,
+    )
+
+    assert hv.horizon_validity_curve[0][0] == 1
+    assert hv.horizon_validity_curve[0][1] > 0.5
+    assert hv.h_star_months == 0
+    assert hv.h_star_q05 == 0

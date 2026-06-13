@@ -234,6 +234,7 @@ def test_write_forecast_cells_upserts_rows():
 def test_assemble_fit_data_falls_through_to_csv(tmp_path, monkeypatch):
     """When Postgres raises, assemble_fit_data should try CSVs next."""
     import csv
+    import json
     from david.model.fit import assemble_fit_data
 
     # Make DB fail
@@ -257,11 +258,128 @@ def test_assemble_fit_data_falls_through_to_csv(tmp_path, monkeypatch):
     (tmp_path / "coder_labels.csv").write_text(
         "evidence_id,coder_id,label,tactic_k,source_id\nev1,human_1,1,SIO,src1\n"
     )
+    coded_dir = tmp_path / "coded"
+    coded_dir.mkdir()
+    (coded_dir / "coder_calibration_v001.json").write_text(json.dumps({
+        "coders": ["human_1"],
+        "kappa_plus": [{"mean": 0.875, "sd": 0.05}],
+        "kappa_minus": [{"mean": 0.825, "sd": 0.06}],
+    }))
+    monkeypatch.setattr("david.model.fit.CODED_DIR", coded_dir)
 
     data = assemble_fit_data(input_dir=tmp_path, L=3, H_forecast=3)
     assert data["R"] == 1
     assert data["L"] == 3
     assert data["N_label"] == 1
+    assert data["kappa_plus_raw_prior_mean"][0] > 0
+    assert data["kappa_minus_raw_prior_mean"][0] > 0
+    assert data["coder_likelihood_weight"] == [1.0]
+    assert data["_source_ids"] == ["src1"]
+    assert data["_source_independence"]["gate_status"] == "fail"
+    assert data["_source_independence"]["reason"] == "fewer_than_3_active_sources"
+
+
+def test_stan_data_only_strips_non_stan_source_metadata():
+    from david.model.fit import _stan_data_only
+
+    data = {
+        "R": 1,
+        "T": 1,
+        "_source_ids": ["s1", "s2", "s3"],
+        "_source_independence": {"gate_status": "pass"},
+    }
+
+    assert _stan_data_only(data) == {"R": 1, "T": 1}
+
+
+def test_assemble_fit_data_fails_closed_without_coder_calibration(tmp_path, monkeypatch):
+    """Real-data fit assembly must not silently use fixed κ priors."""
+    from david.model.fit import assemble_fit_data
+
+    def _failing_get_adjudicated():
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(
+        "david.db.repositories.get_adjudicated_data",
+        _failing_get_adjudicated,
+    )
+    monkeypatch.setattr("david.model.fit.CODED_DIR", tmp_path / "coded")
+
+    (tmp_path / "strata.csv").write_text("stratum_g,I_O\nsg1,0.5\n")
+    (tmp_path / "sources.csv").write_text("source_id\nsrc1\n")
+    (tmp_path / "evidence_items.csv").write_text(
+        "evidence_id,stratum_g,source_id,evidence_date\nev1,sg1,src1,2024-01-01\n"
+    )
+    (tmp_path / "coder_labels.csv").write_text(
+        "evidence_id,coder_id,label,tactic_k,source_id\nev1,human_1,1,SIO,src1\n"
+    )
+
+    with pytest.raises(FileNotFoundError, match="coder calibration artifact missing"):
+        assemble_fit_data(input_dir=tmp_path, L=3, H_forecast=3)
+
+
+def test_assemble_fit_data_fails_closed_on_low_kappa_calibration(tmp_path, monkeypatch):
+    """Active coders below the gold-calibration tripwire cannot enter the fit."""
+    from david.model.fit import assemble_fit_data
+
+    def _failing_get_adjudicated():
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr("david.db.repositories.get_adjudicated_data", _failing_get_adjudicated)
+    coded_dir = tmp_path / "coded"
+    coded_dir.mkdir()
+    monkeypatch.setattr("david.model.fit.CODED_DIR", coded_dir)
+
+    (tmp_path / "strata.csv").write_text("stratum_g,I_O\nsg1,0.5\n")
+    (tmp_path / "sources.csv").write_text("source_id\nsrc1\n")
+    (tmp_path / "evidence_items.csv").write_text(
+        "evidence_id,stratum_g,source_id,evidence_date\nev1,sg1,src1,2024-01-01\n"
+    )
+    (tmp_path / "coder_labels.csv").write_text(
+        "evidence_id,coder_id,label,tactic_k,source_id\nev1,coder_bad,1,SIO,src1\n"
+    )
+    (coded_dir / "coder_calibration_v001.json").write_text(json.dumps({
+        "coders": ["coder_bad"],
+        "kappa_plus": [{"mean": 0.54, "sd": 0.05}],
+        "kappa_minus": [{"mean": 0.82, "sd": 0.06}],
+    }))
+
+    with pytest.raises(ValueError, match="below tripwire"):
+        assemble_fit_data(input_dir=tmp_path, L=3, H_forecast=3)
+
+
+def test_calibrated_fit_data_discounts_multiple_coders_as_one_family(tmp_path, monkeypatch):
+    import json
+    from david.model.fit import assemble_fit_data
+
+    def _failing_get_adjudicated():
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr("david.db.repositories.get_adjudicated_data", _failing_get_adjudicated)
+    coded_dir = tmp_path / "coded"
+    coded_dir.mkdir()
+    monkeypatch.setattr("david.model.fit.CODED_DIR", coded_dir)
+
+    (tmp_path / "strata.csv").write_text("stratum_g,I_O\nsg1,0.5\n")
+    (tmp_path / "sources.csv").write_text("source_id\nsrc1\n")
+    (tmp_path / "evidence_items.csv").write_text(
+        "evidence_id,stratum_g,source_id,evidence_date\nev1,sg1,src1,2024-01-01\n"
+    )
+    (tmp_path / "coder_labels.csv").write_text(
+        "evidence_id,coder_id,label,tactic_k,source_id\n"
+        "ev1,coder_a,1,SIO,src1\n"
+        "ev1,coder_b,1,SIO,src1\n"
+    )
+    (coded_dir / "coder_calibration_v001.json").write_text(json.dumps({
+        "coders": ["coder_a", "coder_b"],
+        "kappa_plus": [{"mean": 0.875, "sd": 0.05}, {"mean": 0.85, "sd": 0.05}],
+        "kappa_minus": [{"mean": 0.825, "sd": 0.06}, {"mean": 0.80, "sd": 0.06}],
+    }))
+
+    data = assemble_fit_data(input_dir=tmp_path, L=3, H_forecast=3)
+
+    assert data["M"] == 2
+    assert data["coder_likelihood_weight"] == [0.5, 0.5]
 
 
 def test_assemble_fit_data_raises_when_both_fail(monkeypatch, tmp_path):

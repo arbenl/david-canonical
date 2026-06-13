@@ -3,7 +3,7 @@
 Applies the gate stack to each forecast cell and writes route_ledger.json.
 
 Order of operations:
-  FG1  measurement battery F1, F3, F4, F5 passed on fit run
+  FG1  F1 passed and falsification battery ledger passed for this run
   FG2  Theorem A' identification distance >= floor
   FG3  Theorem B' I(O) lower 95% CI >= floor
   FG4  Forecast SBC F14 passed for current model version
@@ -44,6 +44,28 @@ ROUTES = (
     "horizon_prior_dominated",
     "prior_dominated",
 )
+
+
+def _finite_float(value: Any) -> float | None:
+    try:
+        val = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(val):
+        return None
+    return val
+
+
+def _source_independence_pass(cell: dict[str, Any]) -> tuple[bool, str | None]:
+    summary = cell.get("source_independence")
+    if summary is None:
+        return False, "FG2_source_independence_missing"
+    if not isinstance(summary, dict):
+        return False, "FG2_source_independence_malformed"
+    if summary.get("gate_status") == "pass":
+        return True, None
+    reason = str(summary.get("reason") or "fail")
+    return False, f"FG2_structural_source_independence:{reason}"
 
 
 def latest_forecast_dir() -> Path:
@@ -89,16 +111,57 @@ def latest_fit_dir() -> Path:
     return max(candidates, key=_ts)
 
 
-def _measurement_gates_pass() -> tuple[bool, list[str]]:
-    """Read fit_summary.json and confirm F1, F3, F4, F5 passed."""
+def _falsification_ledger_paths(
+    forecast_dir: Path | None,
+    fit_dir: Path,
+) -> list[Path]:
+    paths: list[Path] = []
+    if forecast_dir is not None:
+        paths.append(forecast_dir / "falsification_ledger.json")
+    paths.append(fit_dir / "falsification_ledger.json")
+    return list(dict.fromkeys(paths))
+
+
+def _falsification_battery_pass(
+    forecast_dir: Path | None,
+    fit_dir: Path,
+) -> tuple[bool, list[str]]:
+    """Return whether the current run has a passing falsification ledger."""
+    for ledger_path in _falsification_ledger_paths(forecast_dir, fit_dir):
+        if not ledger_path.exists():
+            continue
+        try:
+            ledger = json.loads(ledger_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return False, [f"falsification_ledger_unreadable:{ledger_path.name}"]
+        battery = ledger.get("battery_result")
+        if not isinstance(battery, dict):
+            return False, [f"falsification_battery_missing:{ledger_path.name}"]
+        if battery.get("gate_status") == "pass":
+            return True, []
+        failed = battery.get("failed_tests") or []
+        if failed:
+            return False, [f"falsification_failed:{','.join(map(str, failed))}"]
+        return False, [f"falsification_failed:{battery.get('reason', 'unknown')}"]
+    return False, ["falsification_ledger_missing"]
+
+
+def _measurement_gates_pass(forecast_dir: Path | None = None) -> tuple[bool, list[str]]:
+    """Confirm F1 and the falsification battery passed for the current run."""
     fit_dir = latest_fit_dir()
     summary_path = fit_dir / "fit_summary.json"
     if not summary_path.exists():
         return False, ["fit_summary_missing"]
     data = json.loads(summary_path.read_text())
-    # "skip" means the gate cannot be evaluated (no held-out data, etc.) — not a failure
-    failed = [f for f in ("F1", "F3", "F4", "F5")
-              if data.get("gates", {}).get(f, {}).get("gate_status") not in ("pass", "skip")]
+    failed = []
+    if data.get("gates", {}).get("F1", {}).get("gate_status") != "pass":
+        failed.append("F1")
+    falsification_ok, falsification_failed = _falsification_battery_pass(
+        forecast_dir,
+        fit_dir,
+    )
+    if not falsification_ok:
+        failed.extend(falsification_failed)
     return (not failed), failed
 
 
@@ -121,7 +184,7 @@ def apply_forecast_routing(
     out_dir = out_dir or forecast_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    meas_ok, meas_failed = _measurement_gates_pass()
+    meas_ok, meas_failed = _measurement_gates_pass(forecast_dir)
     sbc_ok, sbc_reason = _forecast_sbc_pass()
 
     route_counts: dict[str, int] = {r: 0 for r in ROUTES}
@@ -138,18 +201,28 @@ def apply_forecast_routing(
                 route = "withhold"; reasons.append(f"FG1_fail:{','.join(meas_failed)}")
 
             # FG2 identification distance
-            if (
-                cell["identification_distance_posterior_median"] < ID_DISTANCE_FLOOR
-                and route == "headline"
-            ):
-                route = "evidence_gap"; reasons.append("FG2_d_theta_below_floor")
+            if route == "headline":
+                source_ok, source_reason = _source_independence_pass(cell)
+                if not source_ok:
+                    route = "evidence_gap"
+                    reasons.append(source_reason or "FG2_source_independence_fail")
+                elif cell["identification_distance_posterior_median"] < ID_DISTANCE_FLOOR:
+                    route = "evidence_gap"; reasons.append("FG2_d_theta_below_floor")
 
             # FG3 informativeness
             if route == "headline":
-                if cell["informativeness_I_O_lower_95"] < INFORMATIVENESS_FLOOR_LOWER_95:
+                I_lower95 = _finite_float(cell.get("informativeness_I_O_lower_95"))
+                n_eff_i2 = _finite_float(cell.get("informativeness_n_eff_i2"))
+                if I_lower95 is None:
+                    route = "prior_dominated"
+                    reasons.append("FG3_I_O_lower95_missing")
+                elif I_lower95 < INFORMATIVENESS_FLOOR_LOWER_95:
                     route = "prior_dominated"
                     reasons.append("FG3_I_O_lower95_below_floor")
-                elif cell.get("informativeness_n_eff_i2", float("inf")) < N_EFF_I2_FLOOR:
+                elif n_eff_i2 is None:
+                    route = "prior_dominated"
+                    reasons.append("FG3_N_eff_I2_missing")
+                elif n_eff_i2 < N_EFF_I2_FLOOR:
                     route = "prior_dominated"
                     reasons.append("FG3_N_eff_I2_below_floor")
 
@@ -161,6 +234,21 @@ def apply_forecast_routing(
             if not cell["horizon_validity"]["below_h_star"] and route == "headline":
                 route = "horizon_prior_dominated"
                 reasons.append("FG5_above_h_star")
+
+            # P6: h* prior-sensitivity. If ±1 SD dwell-prior perturbation
+            # changes this horizon's route, the cell is not eligible for a
+            # headline claim even when nominal h* passes.
+            sensitivity = (
+                cell.get("horizon_prior_sensitivity")
+                or cell.get("horizon_validity", {}).get("prior_sensitivity")
+            )
+            if route == "headline":
+                if not isinstance(sensitivity, dict) or "route_changes_at_horizon" not in sensitivity:
+                    route = "monitor_only"
+                    reasons.append("FG5_h_star_prior_sensitivity_missing")
+                elif sensitivity.get("route_changes_at_horizon") is True:
+                    route = "monitor_only"
+                    reasons.append("FG5_h_star_prior_sensitive")
 
             # FG6 endogenous observability
             lo, hi = cell["lambda_endogenous_bounds"]
@@ -303,6 +391,7 @@ def apply_forecast_routing(
                         **exc_result.__dict__,
                         # C-7: explicit alias for the key statistic.
                         "exceedance_fraction": exc_result.exceedance_fraction_at_accepted,
+                        "exceedance_ucl": exc_result.exceedance_ucl_at_accepted,
                     }
                 else:
                     exceedance_summary = {
@@ -357,6 +446,24 @@ def apply_forecast_routing(
     m_claim_eligible = sum(
         1 for c in routed_cells if c.get("forecast_route") == "headline"
     )
+    h_star_prior_sensitive_cells = [
+        c.get("cell_id") or c.get("cell") or f"cell_{i}"
+        for i, c in enumerate(routed_cells)
+        if "FG5_h_star_prior_sensitive" in c.get("route_reasons", [])
+    ]
+    h_star_prior_sensitivity_missing_cells = [
+        c.get("cell_id") or c.get("cell") or f"cell_{i}"
+        for i, c in enumerate(routed_cells)
+        if "FG5_h_star_prior_sensitivity_missing" in c.get("route_reasons", [])
+    ]
+    h_star_prior_sensitivity_summary = {
+        "n_cells_prior_sensitive": len(h_star_prior_sensitive_cells),
+        "n_cells_missing_sensitivity": len(h_star_prior_sensitivity_missing_cells),
+        "prior_sensitive_cells": h_star_prior_sensitive_cells,
+        "missing_sensitivity_cells": h_star_prior_sensitivity_missing_cells,
+        "binding_reason": "FG5_h_star_prior_sensitive",
+        "missing_binding_reason": "FG5_h_star_prior_sensitivity_missing",
+    }
     ledger = {
         "route_counts": route_counts,
         # M: the claim-eligible family — cells that survived FG1–FG5 AND the
@@ -368,6 +475,7 @@ def apply_forecast_routing(
         "exceedance_gate": exceedance_summary,
         "mcse_floor": mcse_summary,
         "sensitivity_envelope": envelope_summary,
+        "h_star_prior_sensitivity": h_star_prior_sensitivity_summary,
         "n_cells_total": len(routed_cells),
         "cells": routed_cells,
         "timestamp": datetime.utcnow().isoformat() + "Z",

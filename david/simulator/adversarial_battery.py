@@ -27,6 +27,9 @@ from typing import Callable
 
 import numpy as np
 
+REQUIRED_TESTS: frozenset[str] = frozenset({"F1", "F11", "F12", "F13", "F14"})
+CONDITIONAL_TESTS: frozenset[str] = frozenset({"F3", "F4", "F5", "F6", "F7", "F15"})
+
 
 @dataclass
 class TestResult:
@@ -103,10 +106,26 @@ def F6_adversarial_null(m01_elpd_under_permutation: float, B0_elpd: float,
 def F11_source_conditional_independence(
     pairwise_residual_p_values: dict[tuple[str, str], float],
     bonferroni_alpha: float = 0.01,
+    structural_s_eff: float | None = None,
+    structural_floor: float = 3.0,
 ) -> TestResult:
+    if structural_s_eff is not None and structural_s_eff < structural_floor:
+        return TestResult(
+            "F11",
+            "fail",
+            float(structural_s_eff),
+            structural_floor,
+            f"structural_s_eff_{structural_s_eff:.3f}_below_floor_{structural_floor:.3f}",
+        )
     n_pairs = len(pairwise_residual_p_values)
     if n_pairs == 0:
-        return TestResult("F11", "pass", 1.0, bonferroni_alpha, "no_pairs")
+        return TestResult(
+            "F11",
+            "fail",
+            0.0,
+            bonferroni_alpha,
+            "no_pairs_required_independence_evidence_missing",
+        )
     bonferroni = bonferroni_alpha / n_pairs
     failed = [p for p in pairwise_residual_p_values.values() if p < bonferroni]
     status = "pass" if not failed else "fail"
@@ -175,8 +194,19 @@ def run_battery(*, inputs: dict[str, dict]) -> dict:
     for tid, fn in F_BATTERY.items():
         kwargs = inputs.get(tid, {})
         if not kwargs:
-            results.append(TestResult(tid, "skip", float("nan"), float("nan"),
-                                      "no_inputs_provided"))
+            if tid in REQUIRED_TESTS:
+                results.append(
+                    TestResult(
+                        tid,
+                        "fail",
+                        float("nan"),
+                        float("nan"),
+                        "required_inputs_missing",
+                    )
+                )
+            else:
+                results.append(TestResult(tid, "skip", float("nan"), float("nan"),
+                                          "conditional_inputs_missing"))
             continue
         results.append(fn(**kwargs))
     failed = [r for r in results if r.gate_status == "fail"]

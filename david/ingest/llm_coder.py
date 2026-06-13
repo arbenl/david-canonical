@@ -8,7 +8,8 @@ Calibration:
     1. Maintain gold/gold_b_calibration.csv with adjudicated Gold_B labels.
     2. For each LLM coder configuration (provider, model, prompt seed), run
        it on the gold set offline, collect Y_{e, m}, B_e.
-    3. Fit coder_calibration.stan to get posterior kappa_plus[m], kappa_minus[m].
+    3. Fit coder_calibration.stan on gold labels to get posterior
+       kappa_plus[m], kappa_minus[m].
     4. Save posteriors to data/coded/coder_calibration_v{N}.json for the fit
        to consume.
 
@@ -36,7 +37,8 @@ from typing import Protocol
 import numpy as np
 
 from ..config import (
-    CODED_DIR, CODER_CALIBRATION_STAN, CONFIG_ROOT, GOLD_DIR, LLM_POOL_REGISTRY,
+    CODED_DIR, CODER_CALIBRATION_STAN, CONFIG_ROOT, GOLD_DIR,
+    KAPPA_CALIBRATION_MIN_MEAN, LLM_POOL_REGISTRY,
 )
 
 # ─── config types ────────────────────────────────────────────────────────────
@@ -511,17 +513,19 @@ def _build_stan_data(
 
     Stan variable mapping:
         E_gold   — number of gold-annotated evidence items
-        E_un     — number of un-annotated (routine-coded) evidence items
         M        — number of coder configurations
         Y_gold   — int[E_gold, M]: coder labels for gold items
         B_gold   — int[E_gold]: ground-truth binary labels for gold items
-        Y_un     — int[E_un, M]: coder labels for un-annotated items
+        _n_un_ignored — metadata count; un-gold labels do not enter κ calibration
 
     For items where a coder has multiple labels (one per tactic class), we
     reduce to a single binary: 1 if ANY tactic class was coded 1, else 0.
     This follows the Dawid-Skene "event detected" convention.
 
     Items coded by fewer than M coders are excluded (requires complete matrix).
+    Un-gold complete items are counted for provenance only. They are deliberately
+    excluded from the Stan likelihood so correlated LLM agreement cannot inflate
+    the gold-calibrated kappa posterior.
     """
     # Aggregate: (evidence_id, coder_id) → 1 if any Y=1, else 0
     label_map: dict[tuple[str, str], int] = defaultdict(int)
@@ -554,27 +558,23 @@ def _build_stan_data(
     un_ids   = [eid for eid in complete if eid not in gold]
 
     E_gold = len(gold_ids)
-    E_un   = len(un_ids)
     if E_gold < 2:
         return None  # too few gold items; calibration is unreliable
 
     # Build matrices (Stan is 1-indexed but cmdstanpy takes Python lists/arrays)
     Y_gold = [[label_map[(eid, c)] for c in coders] for eid in gold_ids]
     B_gold = [gold[eid]            for eid in gold_ids]
-    Y_un   = [[label_map[(eid, c)] for c in coders] for eid in un_ids] if un_ids else [[0]*M]
-    E_un   = max(E_un, 1)  # Stan requires E_un >= 1
 
     return {
         "E_gold": E_gold,
-        "E_un":   E_un,
         "M":      M,
         "Y_gold": Y_gold,
         "B_gold": B_gold,
-        "Y_un":   Y_un,
         # Pass coders list as metadata (not used by Stan)
         "_coders": coders,
         "_gold_ids": gold_ids,
         "_un_ids":   un_ids,
+        "_n_un_ignored": len(un_ids),
     }
 
 
@@ -586,7 +586,7 @@ def calibrate_coders() -> dict:
         data/coded/coded_*.jsonl            — LLM coder labels
 
     Fits:
-        stan/coder_calibration.stan         — Dawid-Skene model
+        stan/coder_calibration.stan         — gold-only Dawid-Skene model
 
     Writes:
         data/coded/coder_calibration_v{N}.json   — kappa posterior summaries
@@ -637,6 +637,7 @@ def calibrate_coders() -> dict:
     coders: list[str] = stan_data.pop("_coders")
     stan_data.pop("_gold_ids", None)
     un_ids: list[str] = stan_data.pop("_un_ids", [])
+    n_un_ignored = int(stan_data.pop("_n_un_ignored", len(un_ids)))
 
     # Fit with cmdstanpy
     try:
@@ -680,6 +681,20 @@ def calibrate_coders() -> dict:
     M = stan_data["M"]
     kappa_plus  = _extract("kappa_plus",  M)
     kappa_minus = _extract("kappa_minus", M)
+    failed_coders = _coder_calibration_tripwire_failures(
+        coders,
+        kappa_plus,
+        kappa_minus,
+    )
+    if failed_coders:
+        return {
+            "gate_status": "fail",
+            "reason": "coder_kappa_below_tripwire",
+            "floor": KAPPA_CALIBRATION_MIN_MEAN,
+            "failed_coders": failed_coders,
+            "n_coders": M,
+            "n_gold": stan_data["E_gold"],
+        }
 
     # Save posteriors
     CODED_DIR.mkdir(parents=True, exist_ok=True)
@@ -691,7 +706,9 @@ def calibrate_coders() -> dict:
         "version": next_v,
         "calibrated_at": datetime.utcnow().isoformat() + "Z",
         "n_gold": stan_data["E_gold"],
-        "n_un":   stan_data["E_un"],
+        "n_un_ignored": n_un_ignored,
+        "calibration_likelihood": "gold_only",
+        "ungold_policy": "excluded_from_kappa_until_dependence_aware_likelihood",
         "coders": coders,
         "kappa_plus":  kappa_plus,
         "kappa_minus": kappa_minus,
@@ -704,5 +721,32 @@ def calibrate_coders() -> dict:
         "summary_path": str(summary_path),
         "n_coders": M,
         "n_gold":   stan_data["E_gold"],
+        "n_un_ignored": n_un_ignored,
         "version":  next_v,
     }
+
+
+def _coder_calibration_tripwire_failures(
+    coders: list[str],
+    kappa_plus: list[dict[str, float]],
+    kappa_minus: list[dict[str, float]],
+) -> list[dict[str, float | str]]:
+    """Return coders whose gold-calibrated kappa means are too weak."""
+    failures: list[dict[str, float | str]] = []
+    for idx, coder in enumerate(coders):
+        plus_mean = float(kappa_plus[idx].get("mean", float("nan")))
+        minus_mean = float(kappa_minus[idx].get("mean", float("nan")))
+        if (
+            not np.isfinite(plus_mean)
+            or not np.isfinite(minus_mean)
+            or plus_mean < KAPPA_CALIBRATION_MIN_MEAN
+            or minus_mean < KAPPA_CALIBRATION_MIN_MEAN
+        ):
+            failures.append(
+                {
+                    "coder": coder,
+                    "kappa_plus_mean": plus_mean,
+                    "kappa_minus_mean": minus_mean,
+                }
+            )
+    return failures

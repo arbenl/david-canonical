@@ -20,11 +20,15 @@ import numpy as np
 from cmdstanpy import CmdStanModel
 
 from ..config import (
-    ADJUDICATED_DIR, BULK_ESS_MIN, DIVERGENCES_ALLOWED, FITS_DIR,
-    FORECAST_HORIZONS_MONTHS, ID_DISTANCE_FLOOR, INFORMATIVENESS_FLOOR_LOWER_95,
-    MIN_CHAINS, MIN_POSTERIOR_DRAWS, M01_FORWARD_STAN, MODEL_VERSION,
-    N_EFF_I2_FLOOR, POSTERIOR_FDP_DEFAULT_Q, R_HAT_MAX, TAIL_ESS_MIN,
+    ADJUDICATED_DIR, BULK_ESS_MIN, CODED_DIR, DIVERGENCES_ALLOWED, FITS_DIR,
+    FORECAST_HORIZONS_MONTHS, DWELL_LOG_LAMBDA_PRIOR_SD, ID_DISTANCE_FLOOR,
+    INFORMATIVENESS_FLOOR_LOWER_95, KAPPA_CALIBRATION_MIN_MEAN, MIN_CHAINS,
+    MIN_POSTERIOR_DRAWS, M01_FORWARD_STAN, MODEL_VERSION,
+    N_EFF_I2_FLOOR, OBSERVABILITY_GRID, POSTERIOR_FDP_DEFAULT_Q,
+    PRIOR_PREDICTIVE_REFERENCE,
+    R_HAT_MAX, TAIL_ESS_MIN,
 )
+from ..ingest.source_independence_ledger import structural_independence_summary
 
 _COMPILED_MODEL: CmdStanModel | None = None
 
@@ -263,6 +267,11 @@ def assemble_fit_data_from_synthetic(world: Any, horizon: int) -> dict[str, Any]
         "y": y_labels,
         "label_start": label_start,
         "label_len": label_len,
+        "kappa_plus_raw_prior_mean": [1.0] * M,
+        "kappa_plus_raw_prior_sd": [0.5] * M,
+        "kappa_minus_raw_prior_mean": [1.0] * M,
+        "kappa_minus_raw_prior_sd": [0.5] * M,
+        "coder_likelihood_weight": [1.0] * M,
         "delta_max": 0.30,
         "H_forecast": H_forecast,
     }
@@ -319,7 +328,8 @@ def extract_theta_space_draws(fit: Any) -> dict[str, np.ndarray]:
     # Direct matches in parameters block
     for name in ("alpha_activity", "dwell_lambda",
                  "selection_alpha", "selection_observability", "selection_activity",
-                 "delta_raw", "j_raw", "delta_observability", "j_observability"):
+                 "delta_raw", "j_raw", "delta_observability", "j_observability",
+                 "coder_common_mode_weight"):
         arr = fit.stan_variable(name)
         out.update(_flatten_draws(name, arr))
 
@@ -355,6 +365,7 @@ def _build_stan_data_from_rows(
     strata_rows: list[dict[str, str]],
     L: int,
     H_forecast: int,
+    require_coder_calibration: bool = True,
 ) -> dict[str, Any]:
     """Build the Stan data dict from pre-loaded row dicts.
 
@@ -458,6 +469,15 @@ def _build_stan_data_from_rows(
         y_vals.append(lbl)
 
     label_start, label_len = _build_label_index(label_unit, label_source, U, S)
+    kappa_priors = (
+        _load_calibrated_kappa_raw_priors(coder_to_index)
+        if require_coder_calibration
+        else _default_kappa_raw_priors(M)
+    )
+    active_source_ids = [
+        source_id
+        for source_id, _idx in sorted(source_to_index.items(), key=lambda kv: kv[1])
+    ]
 
     return {
         "R": R, "T": T, "L": L, "K": K, "S": S, "M": M, "U": U,
@@ -473,8 +493,95 @@ def _build_stan_data_from_rows(
         "y":               y_vals,
         "label_start":     label_start,
         "label_len":       label_len,
+        **kappa_priors,
         "delta_max":       0.30,
         "H_forecast":      max(1, H_forecast),
+        "_source_ids": active_source_ids,
+        "_source_independence": structural_independence_summary(active_source_ids),
+    }
+
+
+def _stan_data_only(data: dict[str, Any]) -> dict[str, Any]:
+    """Remove non-Stan metadata before passing data to CmdStan."""
+    return {k: v for k, v in data.items() if not k.startswith("_")}
+
+
+def _default_kappa_raw_priors(M: int) -> dict[str, list[float]]:
+    return {
+        "kappa_plus_raw_prior_mean": [1.0] * M,
+        "kappa_plus_raw_prior_sd": [0.5] * M,
+        "kappa_minus_raw_prior_mean": [1.0] * M,
+        "kappa_minus_raw_prior_sd": [0.5] * M,
+        "coder_likelihood_weight": [1.0] * M,
+    }
+
+
+def _latest_coder_calibration_path(coded_dir: Path | None = None) -> Path:
+    coded_dir = coded_dir or CODED_DIR
+    candidates = sorted(coded_dir.glob("coder_calibration_v*.json"))
+    if not candidates:
+        raise FileNotFoundError(
+            f"coder calibration artifact missing in {coded_dir}; run `david calibrate-coders`"
+        )
+    return candidates[-1]
+
+
+def _kappa_summary_to_raw_prior(summary: dict[str, Any]) -> tuple[float, float]:
+    """Moment-match constrained kappa summary to raw scale."""
+    mean = float(summary.get("mean", float("nan")))
+    sd = float(summary.get("sd", float("nan")))
+    if not np.isfinite(mean) or not np.isfinite(sd):
+        raise ValueError("coder calibration summary missing finite mean/sd")
+    if mean < KAPPA_CALIBRATION_MIN_MEAN:
+        raise ValueError(
+            f"coder calibration mean {mean:.3f} below tripwire {KAPPA_CALIBRATION_MIN_MEAN:.3f}"
+        )
+    kappa = float(np.clip(mean, 0.5001, 0.9999))
+    q = float(np.clip(2.0 * kappa - 1.0, 1e-4, 1.0 - 1e-4))
+    raw_mean = float(np.log(q / (1.0 - q)))
+    raw_sd = float(max(0.05, min(5.0, sd * 2.0 / (q * (1.0 - q)))))
+    return raw_mean, raw_sd
+
+
+def _load_calibrated_kappa_raw_priors(
+    coder_to_index: dict[str, int],
+    coded_dir: Path | None = None,
+) -> dict[str, list[float]]:
+    coded_dir = coded_dir or CODED_DIR
+    path = _latest_coder_calibration_path(coded_dir)
+    payload = json.loads(path.read_text())
+    artifact_coders = payload.get("coders", [])
+    if not artifact_coders:
+        raise ValueError(f"coder calibration artifact {path} has no coders")
+    artifact_index = {coder: i for i, coder in enumerate(artifact_coders)}
+    missing = sorted(set(coder_to_index) - set(artifact_index))
+    if missing:
+        raise ValueError(
+            f"coder calibration artifact {path} missing active coders: {missing}"
+        )
+
+    M = len(coder_to_index)
+    plus_mean = [0.0] * M
+    plus_sd = [0.0] * M
+    minus_mean = [0.0] * M
+    minus_sd = [0.0] * M
+    for coder, stan_idx in coder_to_index.items():
+        artifact_i = artifact_index[coder]
+        plus_mean[stan_idx - 1], plus_sd[stan_idx - 1] = _kappa_summary_to_raw_prior(
+            payload["kappa_plus"][artifact_i]
+        )
+        minus_mean[stan_idx - 1], minus_sd[stan_idx - 1] = _kappa_summary_to_raw_prior(
+            payload["kappa_minus"][artifact_i]
+        )
+
+    return {
+        "kappa_plus_raw_prior_mean": plus_mean,
+        "kappa_plus_raw_prior_sd": plus_sd,
+        "kappa_minus_raw_prior_mean": minus_mean,
+        "kappa_minus_raw_prior_sd": minus_sd,
+        # Interim C5 design-effect discount: absent audited coder-family metadata,
+        # treat the active coder pool as one fully correlated family.
+        "coder_likelihood_weight": [1.0 / max(1, M)] * M,
     }
 
 
@@ -544,6 +651,24 @@ def _sigmoid(x: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-np.clip(x, -30.0, 30.0)))
 
 
+def _min_units_per_series_tactic(data: dict[str, Any]) -> int:
+    """Minimum replicate count across observed (series, tactic) cells."""
+    unit_series = data.get("unit_series")
+    unit_tactic = data.get("unit_tactic")
+    if unit_series is not None and unit_tactic is not None and len(unit_series) == len(unit_tactic):
+        counts: dict[tuple[int, int], int] = {}
+        for r, k in zip(unit_series, unit_tactic, strict=False):
+            key = (int(r), int(k))
+            counts[key] = counts.get(key, 0) + 1
+        if counts:
+            return min(counts.values())
+
+    U = int(data.get("U", 1))
+    R = max(1, int(data.get("R", 1)))
+    K = max(1, int(data.get("K", 1)))
+    return max(1, U // (R * K))
+
+
 def _run_theorem_gates(fit: Any, data: dict[str, Any]) -> dict[str, Any]:
     """Extract posterior draws and run theorem A'/B'/C'/D' gates.
 
@@ -554,7 +679,10 @@ def _run_theorem_gates(fit: Any, data: dict[str, Any]) -> dict[str, Any]:
     from ..theorems.A_prime import identification_distance_draws
     from ..theorems.B_prime import informativeness_draws
     from ..theorems.C_renamed import compute_posterior_fdp_threshold
-    from ..theorems.D_forecast_horizon import horizon_validity, stationary_marginal_time
+    from ..theorems.D_forecast_horizon import (
+        horizon_validity_from_z_future_draws,
+        stationary_marginal_time,
+    )
 
     gates: dict[str, Any] = {}
 
@@ -565,55 +693,113 @@ def _run_theorem_gates(fit: Any, data: dict[str, Any]) -> dict[str, Any]:
     j_obs_d     = fit.stan_variable("j_observability")       # (D, S)
     alpha_act_d = fit.stan_variable("alpha_activity")        # (D, L, K)
     dwell_d     = fit.stan_variable("dwell_lambda")          # (D, L)
+    dwell_mean_d = dwell_d + 1.0                             # shifted-Poisson mean μ = λ + 1
     log_jump_d  = fit.stan_variable("log_jump")              # (D, L, L)
+    terminal_regime_d = fit.stan_variable("terminal_regime_posterior_draw")  # (D, R, L)
+    z_future_d = fit.stan_variable("z_future")               # (D, R, H)
 
     D_draws = delta_raw_d.shape[0]
-    # Detection probabilities at representative observability O = 0.5
-    O_rep   = 0.5
-    delta_d = 0.30 * _sigmoid(delta_raw_d + delta_obs_d * O_rep)  # (D, S)
-    j_d     = _sigmoid(j_raw_d + j_obs_d * O_rep)                 # (D, S)
-    rho_d   = delta_d + (1.0 - delta_d) * j_d                     # (D, S)
-    # phi: marginal activity probability per draw.
-    # Use min over (L, K) — worst-case regime × tactic — so the identification
-    # check is conservative: the hardest-to-identify cell sets the bound.
-    phi_d = _sigmoid(alpha_act_d.reshape(D_draws, -1)).mean(axis=1)  # (D,) — mean over (L,K) cells.
-    # Mean avoids the A' gate failing because ONE near-zero cell (phi≈0) drags the identification
-    # distance to near 0.  The typical/average cell is the right measure for the overall gate.
+    obs_grid = np.asarray(OBSERVABILITY_GRID, dtype=float)
+    if obs_grid.ndim != 1 or obs_grid.size == 0:
+        raise ValueError("OBSERVABILITY_GRID must be a non-empty 1-D sequence")
+    # Detection probabilities over the pre-registered observability grid.
+    # Legacy midpoint arrays remain available for scalar diagnostics that are
+    # not gate-defining, but A'/B' gate statistics use the worst grid point.
+    delta_grid_d = 0.30 * _sigmoid(
+        delta_raw_d[:, None, :] + delta_obs_d[:, None, :] * obs_grid[None, :, None]
+    )  # (D, G, S)
+    j_grid_d = _sigmoid(
+        j_raw_d[:, None, :] + j_obs_d[:, None, :] * obs_grid[None, :, None]
+    )  # (D, G, S)
+    rho_grid_d = delta_grid_d + (1.0 - delta_grid_d) * j_grid_d  # (D, G, S)
+    O_rep_idx = int(np.argmin(np.abs(obs_grid - 0.5)))
+    delta_d = delta_grid_d[:, O_rep_idx, :]  # (D, S)
+    rho_d = rho_grid_d[:, O_rep_idx, :]      # (D, S)
+    if terminal_regime_d.ndim == 2:
+        terminal_regime_for_a = terminal_regime_d[:, None, :]
+    else:
+        terminal_regime_for_a = terminal_regime_d
+    if terminal_regime_for_a.shape[0] != D_draws or terminal_regime_for_a.shape[2] != alpha_act_d.shape[1]:
+        raise ValueError("terminal_regime_posterior_draw shape incompatible with alpha_activity")
+    terminal_regime_for_a = terminal_regime_for_a / (
+        terminal_regime_for_a.sum(axis=2, keepdims=True) + 1e-12
+    )
+    phi_regime_tactic_d = _sigmoid(alpha_act_d)  # (D, L, K)
+    # A' gates on phi_g,k = sum_r zeta_g(r) * Pr(A=1 | Z=r, tactic=k),
+    # then takes the hardest currently occupied stratum/tactic cell.
+    phi_series_tactic_d = np.einsum(
+        "drl,dlk->drk",
+        terminal_regime_for_a,
+        phi_regime_tactic_d,
+    )  # (D, R, K)
+    phi_cells_d = phi_series_tactic_d.reshape(D_draws, -1)
+    phi_d = phi_cells_d.min(axis=1)
 
     # ── Theorem A' — practical identification distance ────────────────────────
     try:
-        d_theta = identification_distance_draws(phi_d, rho_d, delta_d)  # (D,)
+        d_theta_by_obs = np.stack(
+            [
+                identification_distance_draws(
+                    phi_d, rho_grid_d[:, g_idx, :], delta_grid_d[:, g_idx, :]
+                )
+                for g_idx in range(obs_grid.size)
+            ],
+            axis=1,
+        )  # (D, G)
+        d_theta = d_theta_by_obs.min(axis=1)  # posterior draws of min_O d(theta, O)
         med_d = float(np.median(d_theta))
+        med_d_by_obs = np.median(d_theta_by_obs, axis=0)
+        worst_obs_idx = int(np.argmin(med_d_by_obs))
+        structural = data.get("_source_independence")
+        if isinstance(structural, dict) and structural.get("gate_status") != "pass":
+            a_status = "fail"
+            a_reason = f"structural_source_independence:{structural.get('reason', 'fail')}"
+        elif med_d >= ID_DISTANCE_FLOOR:
+            a_status = "pass"
+            a_reason = "d_theta_above_floor"
+        else:
+            a_status = "fail"
+            a_reason = f"d_theta_median_{med_d:.4f}_below_floor_{ID_DISTANCE_FLOOR}"
         gates["A_prime"] = {
             "theorem": "A_prime",
             "median_d_theta": med_d,
             "q05_d_theta": float(np.quantile(d_theta, 0.05)),
             "floor": ID_DISTANCE_FLOOR,
-            "gate_status": "pass" if med_d >= ID_DISTANCE_FLOOR else "fail",
-            "reason": (
-                "d_theta_above_floor" if med_d >= ID_DISTANCE_FLOOR
-                else f"d_theta_median_{med_d:.4f}_below_floor_{ID_DISTANCE_FLOOR}"
-            ),
+            "aggregation": "min_over_terminal_weighted_series_tactic_cells_and_observability_grid",
+            "observability_grid": [float(x) for x in obs_grid],
+            "observability_aggregation": "min_over_pre_registered_grid",
+            "worst_observability": float(obs_grid[worst_obs_idx]),
+            "median_d_theta_by_observability": {
+                f"{float(obs):.6g}": float(val)
+                for obs, val in zip(obs_grid, med_d_by_obs, strict=False)
+            },
+            "source_independence": structural,
+            "gate_status": a_status,
+            "reason": a_reason,
         }
     except Exception as exc:
         gates["A_prime"] = {"theorem": "A_prime", "gate_status": "error", "reason": str(exc)}
 
     # ── Theorem B' — source informativeness ───────────────────────────────────
     try:
-        I_d = informativeness_draws(rho_d, delta_d)       # (D, S)
-        # Mean over sources per draw, then lower 95% credible bound.
-        # min(axis=1) caused B' to fail because one posterior tail with near-zero j
-        # dragged the lower 95% bound to 0.03 (sparse data → flat j posterior).
-        # Mean gives the per-draw average source quality, which is the right aggregate.
-        I_worst    = I_d.mean(axis=1)                     # (D,) — avg across sources
-        I_lower95  = float(np.quantile(I_worst, 0.025))
-        I_med      = float(np.median(I_worst))
+        I_d = informativeness_draws(rho_grid_d, delta_grid_d)       # (D, G, S)
+        if I_d.shape[2] >= 3:
+            I_by_obs = np.sort(I_d, axis=2)[:, :, ::-1][:, :, 2]
+            source_aggregation = "third_largest_source"
+        else:
+            I_by_obs = I_d.min(axis=2)
+            source_aggregation = "min_source_under_sourced"
+        I_gate = I_by_obs.min(axis=1)
+        I_med_by_obs = np.median(I_by_obs, axis=0)
+        worst_I_obs_idx = int(np.argmin(I_med_by_obs))
+        I_lower95  = float(np.quantile(I_gate, 0.025))
+        I_med      = float(np.median(I_gate))
         # Gate 1: I lower-95 floor
         gate1_pass = I_lower95 >= INFORMATIVENESS_FLOOR_LOWER_95
         # Gate 2: N_eff × I² floor (pre-registered N_EFF_I2_FLOOR = 3.0).
         # Implement Godambe dependence adjustment:
         from ..theorems.B_prime import dependence_adjusted_n_eff, compute_activity_autocorrelation
-        
+
         # We need Pi_med and dwell_med for autocorrelation
         Pi_log_med = np.median(log_jump_d, axis=0)
         L_val = Pi_log_med.shape[0]
@@ -623,21 +809,21 @@ def _run_theorem_gates(fit: Any, data: dict[str, Any]) -> dict[str, Any]:
         row_sums = Pi_med.sum(axis=1, keepdims=True)
         row_sums = np.where(row_sums == 0, 1.0, row_sums)
         Pi_med = Pi_med / row_sums
-        dwell_med = np.median(dwell_d, axis=0)
-        
+        dwell_med = np.median(dwell_mean_d, axis=0)
+
         phi_k_med = np.median(_sigmoid(alpha_act_d).mean(axis=2), axis=0)  # (L,)
         max_lag = max(1, data.get("T", 1) - 1)
-        
+
         corr_A_h = compute_activity_autocorrelation(
             Pi_med, dwell_med, phi_k_med, max_lag=max_lag, n_mc=max(200, 500 // max(L_val, 1))
         )
-        
-        phi_med = float(np.median(phi_d))
+
+        phi_med = float(np.median(phi_cells_d))
         rho_med = float(np.median(rho_d))
         delta_med = float(np.median(delta_d))
         p_med = rho_med * phi_med + delta_med * (1.0 - phi_med)
-        
-        n_units   = int(data.get("U", 1))
+
+        n_units   = _min_units_per_series_tactic(data)
         n_adj = dependence_adjusted_n_eff(n_units, I_med, phi_med, p_med, corr_A_h)
         n_eff_i2  = n_adj * (I_med ** 2)
         gate2_pass = n_eff_i2 >= N_EFF_I2_FLOOR
@@ -654,6 +840,14 @@ def _run_theorem_gates(fit: Any, data: dict[str, Any]) -> dict[str, Any]:
             "theorem": "B_prime",
             "median_I_worst_source": I_med,
             "lower_95_I_worst_source": I_lower95,
+            "source_aggregation": source_aggregation,
+            "observability_grid": [float(x) for x in obs_grid],
+            "observability_aggregation": "min_over_pre_registered_grid",
+            "worst_observability": float(obs_grid[worst_I_obs_idx]),
+            "median_I_by_observability": {
+                f"{float(obs):.6g}": float(val)
+                for obs, val in zip(obs_grid, I_med_by_obs, strict=False)
+            },
             "floor": INFORMATIVENESS_FLOOR_LOWER_95,
             "n_units": n_units,
             "n_eff_i2": n_eff_i2,
@@ -688,7 +882,20 @@ def _run_theorem_gates(fit: Any, data: dict[str, Any]) -> dict[str, Any]:
     # ── Theorem D' — forecast horizon validity ────────────────────────────────
     try:
         L_val = log_jump_d.shape[1]
-        
+        if terminal_regime_d.ndim == 2:
+            terminal_regime_d = terminal_regime_d[:, None, :]
+        if terminal_regime_d.shape[0] != D_draws or terminal_regime_d.shape[2] != L_val:
+            raise ValueError(
+                "terminal_regime_posterior_draw must have shape (draws, series, regimes)"
+            )
+        R_val = terminal_regime_d.shape[1]
+        if z_future_d.ndim == 2:
+            z_future_d = z_future_d[:, None, :]
+        if z_future_d.shape[0] != D_draws or z_future_d.shape[1] != R_val:
+            raise ValueError("z_future must have shape (draws, series, horizons)")
+        if z_future_d.shape[2] < max(FORECAST_HORIZONS_MONTHS):
+            raise ValueError("z_future does not cover all pre-registered forecast horizons")
+
         # Convert log_jump_d to probabilities for all draws
         Pi_d = np.exp(log_jump_d)
         idx = np.arange(L_val)
@@ -697,49 +904,95 @@ def _run_theorem_gates(fit: Any, data: dict[str, Any]) -> dict[str, Any]:
         row_sums = np.where(row_sums == 0, 1.0, row_sums)
         Pi_d = Pi_d / row_sums
 
-        # We also need pi_inf for the weighting. We'll use the median point for the overall weighting.
+        def _h_star_summary(
+            dwell_mean_draws_for_gate: np.ndarray,
+            *,
+            n_bootstrap_for_gate: int,
+        ) -> tuple[dict[str, Any], Any]:
+            h_stars_per_series: list[int] = []
+            h_stars_q05_per_series: list[int] = []
+            h_stars_q95_per_series: list[int] = []
+            last_hv = None
+            for _r in range(R_val):
+                hv_r = horizon_validity_from_z_future_draws(
+                    cell_id=f"series_{_r}",
+                    Pi_off_diag_draws=Pi_d,
+                    dwell_mean_draws=dwell_mean_draws_for_gate,
+                    z_t_distribution=terminal_regime_d[:, _r, :],
+                    z_future_draws=z_future_d[:, _r, :],
+                    h_max=max(FORECAST_HORIZONS_MONTHS),
+                    n_bootstrap=n_bootstrap_for_gate,
+                )
+                last_hv = hv_r
+                h_stars_per_series.append(hv_r.h_star_months)
+                h_stars_q05_per_series.append(hv_r.h_star_q05)
+                h_stars_q95_per_series.append(hv_r.h_star_q95)
+            return {
+                "h_star_months": int(min(h_stars_q05_per_series)),
+                "h_star_q05": int(min(h_stars_q05_per_series)),
+                "h_star_q95": int(max(h_stars_q95_per_series)),
+                "h_stars_per_series": h_stars_per_series,
+                "h_stars_q05_per_series": h_stars_q05_per_series,
+                "h_stars_q95_per_series": h_stars_q95_per_series,
+            }, last_hv
+
+        nominal_h, D_hv = _h_star_summary(
+            dwell_mean_d,
+            n_bootstrap_for_gate=max(100, 250 // max(L_val, 1)),
+        )
+        h_star_gate = nominal_h["h_star_months"]
+
         Pi_med = np.median(Pi_d, axis=0)
-        dwell_med = np.median(dwell_d, axis=0)
+        dwell_med = np.median(dwell_mean_d, axis=0)
         pi_inf = stationary_marginal_time(Pi_med, dwell_med)
 
-        h_stars_per_regime: list[int] = []
-        h_stars_q05_per_regime: list[int] = []
-        h_stars_q95_per_regime: list[int] = []
-        for _r in range(L_val):
-            z_t_onehot = np.zeros(L_val)
-            z_t_onehot[_r] = 1.0
-            hv_r = horizon_validity(
-                cell_id=f"regime_{_r}",
-                Pi_off_diag_draws=Pi_d,
-                dwell_mean_draws=dwell_d,
-                z_t_distribution=z_t_onehot,
-                h_max=max(FORECAST_HORIZONS_MONTHS),
-                n_mc=max(200, 500 // max(L_val, 1)),
+        # P6 dwell-prior sensitivity: perturb the shifted-Poisson rate λ on
+        # the log scale by ± one registered prior SD, then convert back to
+        # the renewal kernel's mean μ = λ + 1.
+        lambda_draws = np.maximum(dwell_mean_d - 1.0, 1e-9)
+        dwell_minus_sd = lambda_draws * np.exp(-DWELL_LOG_LAMBDA_PRIOR_SD) + 1.0
+        dwell_plus_sd = lambda_draws * np.exp(DWELL_LOG_LAMBDA_PRIOR_SD) + 1.0
+        sensitivity_n_bootstrap = max(50, 150 // max(L_val, 1))
+        minus_h, _ = _h_star_summary(dwell_minus_sd, n_bootstrap_for_gate=sensitivity_n_bootstrap)
+        plus_h, _ = _h_star_summary(dwell_plus_sd, n_bootstrap_for_gate=sensitivity_n_bootstrap)
+        prior_sensitive_horizons = [
+            h for h in FORECAST_HORIZONS_MONTHS
+            if (
+                (h <= h_star_gate)
+                != (h <= minus_h["h_star_months"])
+                or (h <= h_star_gate)
+                != (h <= plus_h["h_star_months"])
             )
-            h_stars_per_regime.append(hv_r.h_star_months)
-            h_stars_q05_per_regime.append(hv_r.h_star_q05)
-            h_stars_q95_per_regime.append(hv_r.h_star_q95)
-        # Stationary-weighted expected h_star
-        h_star_overall = int(round(float(np.dot(h_stars_per_regime, pi_inf))))
-        h_star_q05_overall = int(round(float(np.dot(h_stars_q05_per_regime, pi_inf))))
-        h_star_q95_overall = int(round(float(np.dot(h_stars_q95_per_regime, pi_inf))))
+        ]
         
-        # Also record last D_hv for drift-share diagnostics
-        D_hv = hv_r  # final regime's result (for prior_drift_share_at_h_max)
         gates["D_prime"] = {
             "theorem": "D_prime",
-            "h_star_months": h_star_overall,
-            "h_star_q05": h_star_q05_overall,
-            "h_star_q95": h_star_q95_overall,
-            "h_stars_per_regime": h_stars_per_regime,
+            "h_star_months": h_star_gate,
+            "h_star_q05": h_star_gate,
+            "h_star_q95": nominal_h["h_star_q95"],
+            "h_stars_per_series": nominal_h["h_stars_per_series"],
+            "h_stars_q05_per_series": nominal_h["h_stars_q05_per_series"],
+            "terminal_regime_posterior_source": "stan_generated_quantities",
+            "forecast_regime_source": "stan_z_future_generated_quantities",
+            "stationary_marginal_regime_median": [float(x) for x in pi_inf],
+            "aggregation": "min_series_z_future_q05_first_crossing",
+            "h_star_prior_sensitivity": {
+                "dwell_log_lambda_prior_sd": DWELL_LOG_LAMBDA_PRIOR_SD,
+                "sensitivity_n_bootstrap": sensitivity_n_bootstrap,
+                "nominal_h_star": h_star_gate,
+                "minus_1sd_h_star": minus_h["h_star_months"],
+                "plus_1sd_h_star": plus_h["h_star_months"],
+                "route_change_horizons": prior_sensitive_horizons,
+                "sensitivity_changes_route": bool(prior_sensitive_horizons),
+            },
             "tau": D_hv.tau,
             "prior_drift_share_at_h_max": D_hv.prior_drift_share_at_h_max,
             "forecast_horizons": list(FORECAST_HORIZONS_MONTHS),
             "gate_status": (
-                "pass" if h_star_overall >= min(FORECAST_HORIZONS_MONTHS)
+                "pass" if h_star_gate >= min(FORECAST_HORIZONS_MONTHS)
                 else "fail"
             ),
-            "reason": f"h_star={h_star_overall}_months",
+            "reason": f"h_star_gate={h_star_gate}_months",
         }
     except Exception as exc:
         gates["D_prime"] = {"theorem": "D_prime", "gate_status": "error", "reason": str(exc)}
@@ -753,14 +1006,26 @@ def _run_f1_gate(data: dict[str, Any], n_prior_worlds: int = 200) -> dict[str, A
     Draws n_prior_worlds synthetic worlds from the prior with the same
     (R, T, L, K, S, M) as the fit data, computes per-world Y-rate
     (fraction of labels = 1), and checks whether the prior predictive
-    median Y-rate falls within the historical band derived from the
-    observed label data.
-
-    Historical band: [5th, 95th] percentile of per-time-period Y-rates.
-    Band width clamped to ≥ 0.10 to prevent false negatives on small T.
+    median Y-rate falls within a frozen reference band disjoint from the
+    observed fit data.
     """
     from ..simulator.synthetic_world import sample_world, HyperPrior
     from ..simulator.adversarial_battery import F1_prior_predictive_realism
+
+    try:
+        ref = _load_f1_reference_band()
+    except Exception as exc:
+        return {
+            "gate_status": "fail",
+            "statistic": float("nan"),
+            "prior_predictive_Y_rate_median": float("nan"),
+            "prior_predictive_Y_rate_5th": float("nan"),
+            "prior_predictive_Y_rate_95th": float("nan"),
+            "historical_band_5th": float("nan"),
+            "historical_band_95th": float("nan"),
+            "n_prior_worlds": 0,
+            "reason": f"frozen_f1_reference_missing_or_invalid:{exc}",
+        }
 
     prior = HyperPrior(
         R=data["R"], T=data["T"], L=data["L"],
@@ -771,22 +1036,8 @@ def _run_f1_gate(data: dict[str, Any], n_prior_worlds: int = 200) -> dict[str, A
         for i in range(n_prior_worlds)
     ])
 
-    # Historical band from per-time-period label positive rates
-    unit_time_arr  = np.array(data["unit_time"])      # (U,)
-    y_arr          = np.array(data["y"], dtype=float) # (N_label,)
-    label_unit_arr = np.array(data["label_unit"])     # (N_label,)
-    label_time     = unit_time_arr[label_unit_arr - 1]  # (N_label,) — 0-based unit → time
-    unique_times   = np.unique(label_time)
-    per_time_rates = np.array([
-        y_arr[label_time == t].mean() for t in unique_times
-    ])
-    hist_5th  = float(np.quantile(per_time_rates, 0.05))
-    hist_95th = float(np.quantile(per_time_rates, 0.95))
-    # Clamp band width to avoid trivially-failing gates on sparse data
-    if hist_95th - hist_5th < 0.10:
-        mid       = (hist_5th + hist_95th) / 2.0
-        hist_5th  = max(0.0, mid - 0.05)
-        hist_95th = min(1.0, mid + 0.05)
+    hist_5th = ref["historical_band_5th"]
+    hist_95th = ref["historical_band_95th"]
 
     result = F1_prior_predictive_realism(prior_Y_rates, hist_5th, hist_95th)
     return {
@@ -797,9 +1048,26 @@ def _run_f1_gate(data: dict[str, Any], n_prior_worlds: int = 200) -> dict[str, A
         "prior_predictive_Y_rate_95th": float(np.quantile(prior_Y_rates, 0.95)),
         "historical_band_5th": hist_5th,
         "historical_band_95th": hist_95th,
+        "reference_path": str(PRIOR_PREDICTIVE_REFERENCE),
+        "reference_version": ref.get("version"),
+        "reference_window": ref.get("reference_window"),
         "n_prior_worlds": n_prior_worlds,
         "reason": result.reason,
     }
+
+
+def _load_f1_reference_band(path: Path | None = None) -> dict[str, Any]:
+    path = path or PRIOR_PREDICTIVE_REFERENCE
+    if not path.exists():
+        raise FileNotFoundError(path)
+    payload = json.loads(path.read_text())
+    lo = float(payload["historical_band_5th"])
+    hi = float(payload["historical_band_95th"])
+    if not (0.0 <= lo <= hi <= 1.0):
+        raise ValueError("historical_band_5th/95th must satisfy 0 <= lo <= hi <= 1")
+    payload["historical_band_5th"] = lo
+    payload["historical_band_95th"] = hi
+    return payload
 
 
 def run_fit(run_id: str | None = None, quick: bool = False) -> dict[str, Any]:
@@ -832,7 +1100,7 @@ def run_fit(run_id: str | None = None, quick: bool = False) -> dict[str, Any]:
     warmup = 200 if quick else 2000
     sampling = 200 if quick else 3000
     fit = model.sample(
-        data=data,
+        data=_stan_data_only(data),
         chains=MIN_CHAINS,
         parallel_chains=MIN_CHAINS,  # run all chains in parallel (M4 local — no Railway RAM cap)
         iter_warmup=warmup,
@@ -885,6 +1153,7 @@ def run_fit(run_id: str | None = None, quick: bool = False) -> dict[str, Any]:
         "ess_tail_min": tail_ess_min,
         "divergences": divergences,
         "theorems": theorem_gates,
+        "source_independence": data.get("_source_independence"),
         "gates": {
             "F1": f1_gate,
             # F3/F4/F5 require held-out labels or true activity ground-truth;

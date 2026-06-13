@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
@@ -18,6 +19,7 @@ from david.simulator.sbc import (
     histogram_diagnostics,
     run_sbc,
     _N_BINS,
+    _sbc_gate_failures_from_diagnostics,
 )
 from david.engine.forecast import SbcFail, _sbc_guard
 
@@ -40,7 +42,7 @@ def _u_shaped_ranks(n: int, n_draws: int = 400, seed: int = 0) -> np.ndarray:
 
 
 def _center_clustered_ranks(n: int, n_draws: int = 400, seed: int = 0) -> np.ndarray:
-    """Tight cluster around the midpoint — overcounting likelihood."""
+    """Tight cluster around the midpoint — posterior over-dispersion."""
     rng = np.random.default_rng(seed)
     mu  = n_draws // 2
     raw = rng.normal(mu, n_draws * 0.05, size=n)
@@ -147,6 +149,69 @@ def test_sbc_summary_written_with_shape(small_sbc_result, tmp_path):
     first_param = next(iter(data["per_parameter_ks"].values()))
     assert "histogram_shape" in first_param
     assert "chi_squared" in first_param
+    assert "global_chi_squared_p" in data
+    assert "bh_failed_parameters" in data
+
+
+def test_sbc_chi_square_bh_gate_rejects_extreme_parameter():
+    per_param = {
+        "theta_good": {"chi_squared": 2.0, "chi_squared_p": 0.8},
+        "theta_bad": {"chi_squared": 100.0, "chi_squared_p": 1e-8},
+    }
+
+    gate = _sbc_gate_failures_from_diagnostics(per_param, alpha=0.05)
+
+    assert "theta_bad" in gate["bh_failed_parameters"]
+    assert "theta_bad" in gate["failed_parameters"]
+
+
+def _fake_sbc_world(seed: int) -> SimpleNamespace:
+    return SimpleNamespace(theta={"theta": 0.5 + 0.001 * seed})
+
+
+def _fake_sbc_posterior(seed: int, *, good: bool = True, ess: float = 80.0) -> dict:
+    draws = np.linspace(0.0, 1.0, 120)
+    return {
+        "n_draws": len(draws),
+        "draws": {"theta": draws},
+        "diagnostics": {
+            "rhat_max": 1.01 if good else 1.30,
+            "ess_bulk_min": ess,
+            "ess_tail_min": ess,
+            "divergences": 0 if good else 1,
+        },
+    }
+
+
+def test_sbc_thins_rank_draws_to_accepted_world_min_ess(tmp_path):
+    with (
+        patch("david.simulator.sbc.sample_world", side_effect=lambda _prior, seed: _fake_sbc_world(seed)),
+        patch("david.simulator.sbc.fit_measurement_layer", side_effect=lambda _world, seed: _fake_sbc_posterior(seed, ess=40.0)),
+    ):
+        result = run_sbc(n_worlds=3, out_dir=tmp_path, base_seed=10)
+
+    assert result["sbc_convergence_screen_status"] == "pass"
+    assert result["n_worlds_accepted"] == 3
+    assert result["n_worlds_discarded"] == 0
+    assert result["n_draws_per_fit"] == 40
+
+
+def test_sbc_discards_nonconverged_worlds_and_fails_on_discard_fraction(tmp_path):
+    def _fit(_world, seed):
+        return _fake_sbc_posterior(seed, good=(seed != 11))
+
+    with (
+        patch("david.simulator.sbc.sample_world", side_effect=lambda _prior, seed: _fake_sbc_world(seed)),
+        patch("david.simulator.sbc.fit_measurement_layer", side_effect=_fit),
+    ):
+        result = run_sbc(n_worlds=3, out_dir=tmp_path, base_seed=10)
+
+    assert result["gate_status"] == "fail"
+    assert result["sbc_convergence_screen_status"] == "fail"
+    assert result["n_worlds_accepted"] == 2
+    assert result["n_worlds_discarded"] == 1
+    assert "__sbc_convergence_screen__" in result["failed_parameters"]
+    assert result["discarded_worlds"][0]["seed"] == 11
 
 
 # ─── B-7: sbc_block in falsification ledger ──────────────────────────────────

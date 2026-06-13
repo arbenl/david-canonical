@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ExplainDot } from "@/components/explain-dot";
+import { TrajectoryChart } from "@/components/premium-forecast-chart";
 
 /* ────────────────────────────────────────────────────────────────────────────
    Types
@@ -160,183 +161,7 @@ const BASE_MODELS: ModelData[] = [
 
 const W = 480, H = 180, PAD = 8;
 
-/**
- * E-2: FG5 mathematical grey-out.
- *
- * Renders conditional forecast in accent color for h ≤ h*, then switches to
- * the desaturated π∞ posterior band for h > h*. The h* boundary is marked by
- * a labeled amber vertical rule with the A-5 posterior spread
- * (hStarQ05..hStarQ95) as a translucent x-axis span.
- *
- * The greyed region plots what the engine actually emits (the stored CI values,
- * which converge to π∞ for h > h*) — never an extrapolated conditional line.
- */
-function ForecastAreaChart({
-  curve,
-  accent,
-  hStarQ05,
-  hStarQ95,
-}: Readonly<{
-  curve: CurvePoint[];
-  accent: string;
-  hStarQ05?: number | null;
-  hStarQ95?: number | null;
-}>) {
-  const lo = Math.min(...curve.map((p) => p.lo95));
-  const hi = Math.max(...curve.map((p) => p.hi95));
-  const dom = [Math.max(0, lo - 0.04), Math.min(1, hi + 0.04)];
-
-  const xmax = Math.max(1, curve.length - 1);
-  const sx = (x: number) => PAD + (x / xmax) * (W - 2 * PAD);
-  const sy = (v: number) => H - PAD - ((v - dom[0]) / (dom[1] - dom[0])) * (H - 2 * PAD);
-
-  // FG5: split at the first point that is NOT below h*.
-  const domIdx = curve.findIndex((p) => p.belowHStar === false);
-  const hasPriorDom = domIdx > 0;
-  const condCurve  = hasPriorDom ? curve.slice(0, domIdx) : curve;
-  const priorCurve = hasPriorDom ? curve.slice(domIdx)    : [];
-
-  // h* boundary x-position.
-  const ruleX = hasPriorDom ? sx(domIdx) : null;
-
-  // A-5: x-positions for the h* posterior spread band.
-  // Attempt to map from months to x-index using horizonMonths fields.
-  const hMonths = curve.map((p) => p.horizonMonths ?? null);
-  const hStarSpreadLo = (hStarQ05 != null && hMonths.some((m) => m != null))
-    ? (() => {
-        // linear interpolation between the two nearest x positions
-        const idx = hMonths.findIndex((m) => m != null && m >= hStarQ05);
-        return idx >= 0 ? sx(curve[idx].x) : null;
-      })()
-    : null;
-  const hStarSpreadHi = (hStarQ95 != null && hMonths.some((m) => m != null))
-    ? (() => {
-        const idx = hMonths.findIndex((m) => m != null && m >= hStarQ95);
-        return idx >= 0 ? sx(curve[idx].x) : null;
-      })()
-    : null;
-
-  const bandPath = (
-    pts: CurvePoint[],
-    loKey: "lo80" | "lo95",
-    hiKey: "hi80" | "hi95",
-  ) => {
-    if (pts.length < 2) return "";
-    const top = pts.map((p) => `${sx(p.x)},${sy(p[hiKey])}`).join(" L ");
-    const bot = [...pts].reverse().map((p) => `${sx(p.x)},${sy(p[loKey])}`).join(" L ");
-    return `M ${top} L ${bot} Z`;
-  };
-
-  const midPath = (pts: CurvePoint[]) =>
-    pts.map((p, i) => `${i === 0 ? "M" : "L"} ${sx(p.x)} ${sy(p.mid)}`).join(" ");
-
-  const gid = "fglow-" + accent.replace("#", "");
-
-  // π∞ representative level: use the mean of the prior-dominated mid values.
-  const piInfMid = priorCurve.length > 0
-    ? priorCurve.reduce((s, p) => s + (p.piInfMid ?? p.mid), 0) / priorCurve.length
-    : null;
-
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="h-full w-full" preserveAspectRatio="none">
-      <defs>
-        <filter id={gid} x="-20%" y="-20%" width="140%" height="140%">
-          <feGaussianBlur stdDeviation="3.2" result="b" />
-          <feMerge>
-            <feMergeNode in="b" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
-        <linearGradient id={gid + "-fill"} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={accent} stopOpacity="0.35" />
-          <stop offset="100%" stopColor={accent} stopOpacity="0.02" />
-        </linearGradient>
-      </defs>
-
-      {/* gridlines */}
-      {[0.25, 0.5, 0.75].map((g) => (
-        <line key={g} x1={PAD} x2={W - PAD}
-          y1={sy(dom[0] + (dom[1] - dom[0]) * g)} y2={sy(dom[0] + (dom[1] - dom[0]) * g)}
-          stroke="#1e293b" strokeWidth="1" strokeDasharray="3 4" />
-      ))}
-
-      {/* ── Conditional forecast segment (h ≤ h*) — full accent color ─────── */}
-      {/* 95% CI */}
-      <path d={bandPath(condCurve, "lo95", "hi95")} fill={accent} fillOpacity="0.10"
-        stroke={accent} strokeOpacity="0.18" strokeWidth="1" />
-      {/* 80% CI */}
-      <path d={bandPath(condCurve, "lo80", "hi80")} fill={`url(#${gid}-fill)`}
-        stroke={accent} strokeOpacity="0.4" strokeWidth="1" />
-      {/* median line with glow */}
-      {condCurve.length > 1 && (
-        <>
-          <path d={midPath(condCurve)} fill="none" stroke={accent} strokeWidth="2.5"
-            filter={`url(#${gid})`} />
-          <circle cx={sx(condCurve.at(-1)!.x)} cy={sy(condCurve.at(-1)!.mid)}
-            r="3.5" fill={accent} filter={`url(#${gid})`} />
-        </>
-      )}
-
-      {/* ── FG5 boundary: h* vertical rule + A-5 spread band ──────────────── */}
-      {hasPriorDom && ruleX != null && (
-        <g>
-          {/* A-5 posterior spread (hStarQ05..hStarQ95) — soft amber fill */}
-          {hStarSpreadLo != null && hStarSpreadHi != null && (
-            <rect
-              x={Math.min(hStarSpreadLo, hStarSpreadHi)}
-              y={PAD}
-              width={Math.abs(hStarSpreadHi - hStarSpreadLo)}
-              height={H - 2 * PAD}
-              fill="#f59e0b"
-              fillOpacity="0.07"
-            />
-          )}
-          {/* h* vertical rule */}
-          <line x1={ruleX} y1={PAD} x2={ruleX} y2={H - PAD}
-            stroke="#f59e0b" strokeWidth="1.5" strokeDasharray="5 3" strokeOpacity="0.9" />
-          <text x={ruleX + 5} y={PAD + 13} fill="#f59e0b" fontSize="10" fontWeight="600"
-            fontFamily="monospace">
-            h*
-          </text>
-          {/* π∞ level guide line */}
-          {piInfMid != null && (
-            <line
-              x1={ruleX} x2={W - PAD}
-              y1={sy(piInfMid)} y2={sy(piInfMid)}
-              stroke="#475569" strokeWidth="1" strokeDasharray="2 4"
-            />
-          )}
-        </g>
-      )}
-
-      {/* ── Prior-dominated segment (h > h*) — desaturated π∞ band ──────── */}
-      {priorCurve.length > 0 && (
-        <g opacity="0.65">
-          {/* 80% CI in grey */}
-          <path d={bandPath(priorCurve, "lo80", "hi80")}
-            fill="#475569" fillOpacity="0.22" stroke="#475569" strokeOpacity="0.35" strokeWidth="1" />
-          {/* 95% CI outline only */}
-          <path d={bandPath(priorCurve, "lo95", "hi95")}
-            fill="none" stroke="#334155" strokeOpacity="0.45" strokeWidth="1" strokeDasharray="2 3" />
-          {/* Label */}
-          <text
-            x={sx(priorCurve[0].x) + 6}
-            y={H - PAD - 6}
-            fill="#64748b" fontSize="9" fontFamily="monospace"
-          >
-            π∞ prior band
-          </text>
-        </g>
-      )}
-
-      {/* leading dot on the last conditional point */}
-      {condCurve.length === 0 && curve.length > 0 && (
-        <circle cx={sx(curve.at(-1)!.x)} cy={sy(curve.at(-1)!.mid)}
-          r="3.5" fill={accent} filter={`url(#${gid})`} />
-      )}
-    </svg>
-  );
-}
+// SVG charts removed in favor of animated components from premium-forecast-chart.tsx
 
 const REGIME_COLORS = {
   bullish: "#34d399", bearish: "#f87171", volatile: "#fbbf24", stable: "#38bdf8",
@@ -638,11 +463,11 @@ function ForecastChartCard({
         </div>
       </div>
       <div className="relative h-44">
-        <ForecastAreaChart
+        <TrajectoryChart
           curve={model.curve}
           accent={model.accent}
-          hStarQ05={hStarQ05}
-          hStarQ95={hStarQ95}
+          hStarQ05={hStarQ05 ?? 4}
+          hStarQ95={hStarQ95 ?? 6}
         />
         {theoremFail && !sbcFail && (
           <div className="absolute inset-0 z-30 flex items-center justify-center rounded-lg bg-[#020617]/90 backdrop-blur-sm">

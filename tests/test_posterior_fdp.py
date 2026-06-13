@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+
 import numpy as np
 import pytest
 
@@ -38,6 +40,19 @@ def test_q_strict_blocks_lower_confidence():
     # 0.99 and 0.95 give FDP 0.03 (pass);
     # 0.99, 0.95, 0.90 give FDP ~0.053 (fail)
     assert res.n_flagged == 2
+
+
+def test_expectation_gate_api_accepts_only_marginals():
+    """C-5 guard: expectation FDP path has no joint-draw input surface."""
+    sig = inspect.signature(compute_posterior_fdp_threshold)
+    assert list(sig.parameters) == ["p_hat", "q"]
+    assert sig.parameters["p_hat"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+    assert sig.parameters["q"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+
+    p = np.array([0.95, 0.90, 0.40])
+    joint_draws = np.ones((100, 3), dtype=np.int32)
+    with pytest.raises(TypeError):
+        compute_posterior_fdp_threshold(p, joint_draws=joint_draws)  # type: ignore[call-arg]
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +186,27 @@ def test_exceedance_gate_no_prefix_passes_returns_zero():
     res = compute_fdp_exceedance_gate(draws, m_star=3, gamma=0.05, alpha=0.01)
     assert res.m_accepted == 0
     assert res.exceedance_fraction_at_accepted == pytest.approx(0.0)
+
+
+def test_exceedance_gate_uses_upper_confidence_limit():
+    # Raw exceedance is 1/20 = 0.05, but the one-sided 95% UCL is > 0.05.
+    # The gate must not certify this prefix on the raw fraction alone.
+    draws = np.ones((20, 1), dtype=int)
+    draws[0, 0] = 0
+
+    res = compute_fdp_exceedance_gate(draws, m_star=1, gamma=0.15, alpha=0.05)
+
+    assert res.m_accepted == 0
+    assert res.exceedance_fraction_at_accepted == pytest.approx(0.0)
+
+
+def test_exceedance_gate_accepts_chain_draw_shape_and_reports_split_ess():
+    draws = np.ones((2, 500, 3), dtype=int)
+
+    res = compute_fdp_exceedance_gate(draws, m_star=3, gamma=0.15, alpha=0.05)
+
+    assert res.m_accepted == 3
+    assert res.exceedance_ess_at_accepted == pytest.approx(1000.0)
 
 
 # ---------------------------------------------------------------------------
@@ -384,6 +420,20 @@ def test_mcse_floor_low_ess_excludes_cell():
     assert 0 not in result.excluded_indices, (
         f"Cell 0 (iid, good ESS) must pass; mcse[0]={result.mcse[0]:.6f}"
     )
+
+
+def test_mcse_floor_uses_chain_axis_for_split_chain_ess():
+    n_chains, n_draws = 2, 1000
+    rng = np.random.default_rng(123)
+    draws = rng.binomial(1, 0.9, size=(n_chains, n_draws, 2)).astype(float)
+    block = np.repeat(np.tile([1.0, 0.0], n_draws // 100 + 1), 100)[:n_draws]
+    draws[:, :, 1] = block
+
+    result = check_mcse_floor(draws, q=0.10)
+
+    assert 1 in result.excluded_indices
+    assert 0 not in result.excluded_indices
+    assert result.bulk_ess[1] < n_chains * n_draws
 
 
 def test_mcse_floor_all_identical_draws_pass():

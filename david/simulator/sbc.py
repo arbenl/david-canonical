@@ -9,8 +9,9 @@ For each of N synthetic worlds:
   3. Fit m01_forward.stan to the synthetic data.
   4. Compute rank statistic of theta_true within posterior draws.
 
-Pass criterion: rank statistics uniform on [0, N_post]. Tested via
-Kolmogorov-Smirnov against uniform at SBC_KS_ALPHA.
+Pass criterion: rank histograms pass a binned chi-square falsification stack
+with Benjamini-Hochberg control and a global chi-square test. KS statistics are
+reported as diagnostics but no longer the sole gate.
 
 This is the proof anchor for the measurement layer. F2 of the falsification
 battery is satisfied by passing this.
@@ -27,7 +28,10 @@ import numpy as np
 from scipy import stats as sp_stats
 
 from ..config import (
-    FITS_DIR, MODEL_VERSION, SBC_BONFERRONI, SBC_KS_ALPHA,
+    FITS_DIR, MODEL_VERSION, SBC_BONFERRONI, SBC_CHI2_BH_ALPHA,
+    SBC_BULK_ESS_MIN, SBC_DIVERGENCES_ALLOWED, SBC_HISTOGRAM_EXCESS,
+    SBC_KS_ALPHA, SBC_MAX_DISCARD_FRACTION, SBC_R_HAT_MAX,
+    SBC_RANK_DRAWS_TARGET,
 )
 from .synthetic_world import HyperPrior, sample_world
 
@@ -92,11 +96,13 @@ def histogram_diagnostics(
     centre_rate = center_count     / (n_center_bins * expected)
 
     # Classification:
-    # U_shaped         — BOTH edge bands are dense (prior/width mismatch)
-    # center_clustered — centre is dense relative to both edges (likelihood overcounting)
+    # U_shaped         — BOTH edge bands are dense: posterior under-dispersed /
+    #                    overconfident, the expected signature of likelihood
+    #                    double-counting or correlated-coder overcounting.
+    # center_clustered — centre is dense: posterior over-dispersed.
     # skew             — ONE edge band is dense, not the other (posterior bias)
     # uniform          — none of the above
-    EXCESS = 1.35  # density ratio threshold vs uniform expectation
+    EXCESS = SBC_HISTOGRAM_EXCESS
 
     if left_rate >= EXCESS and right_rate >= EXCESS:
         shape = "U_shaped"
@@ -116,6 +122,116 @@ def histogram_diagnostics(
     }
 
 
+def _benjamini_hochberg_rejections(
+    p_values: dict[str, float],
+    alpha: float,
+) -> list[str]:
+    finite = sorted(
+        (name, p) for name, p in p_values.items()
+        if isinstance(p, float) and np.isfinite(p)
+    )
+    m = len(finite)
+    if m == 0:
+        return []
+    cutoff_rank = 0
+    for rank, (_name, p) in enumerate(finite, start=1):
+        if p <= alpha * rank / m:
+            cutoff_rank = rank
+    if cutoff_rank == 0:
+        return []
+    cutoff = finite[cutoff_rank - 1][1]
+    return [name for name, p in finite if p <= cutoff]
+
+
+def _sbc_gate_failures_from_diagnostics(
+    per_param: dict[str, dict],
+    alpha: float = SBC_CHI2_BH_ALPHA,
+) -> dict[str, Any]:
+    chi2_p_values = {
+        name: float(diag["chi_squared_p"])
+        for name, diag in per_param.items()
+        if isinstance(diag.get("chi_squared_p"), float)
+        and np.isfinite(diag["chi_squared_p"])
+    }
+    bh_failed = _benjamini_hochberg_rejections(chi2_p_values, alpha=alpha)
+
+    chi2_stats = [
+        float(diag["chi_squared"])
+        for diag in per_param.values()
+        if isinstance(diag.get("chi_squared"), float)
+        and np.isfinite(diag["chi_squared"])
+    ]
+    global_stat = float(np.sum(chi2_stats)) if chi2_stats else float("nan")
+    global_df = len(chi2_stats) * (_N_BINS - 1)
+    global_p = (
+        float(sp_stats.chi2.sf(global_stat, df=global_df))
+        if global_df > 0 else float("nan")
+    )
+    global_failed = bool(np.isfinite(global_p) and global_p < alpha)
+
+    failed = sorted(set(bh_failed))
+    if global_failed:
+        failed = sorted(set(failed) | {"__global_rank_histogram__"})
+
+    return {
+        "failed_parameters": failed,
+        "bh_failed_parameters": bh_failed,
+        "global_chi_squared": global_stat,
+        "global_chi_squared_df": global_df,
+        "global_chi_squared_p": global_p,
+        "global_chi_squared_failed": global_failed,
+        "chi2_bh_alpha": alpha,
+    }
+
+
+def _posterior_diagnostics_acceptance(posterior: dict[str, Any]) -> tuple[bool, list[str]]:
+    diagnostics = posterior.get("diagnostics") or {}
+    reasons: list[str] = []
+
+    rhat = diagnostics.get("rhat_max")
+    if rhat is None or not np.isfinite(float(rhat)):
+        reasons.append("R_hat_missing")
+    elif float(rhat) > SBC_R_HAT_MAX:
+        reasons.append(f"R_hat={float(rhat):.4f}>{SBC_R_HAT_MAX}")
+
+    ess_bulk = diagnostics.get("ess_bulk_min")
+    if ess_bulk is None or not np.isfinite(float(ess_bulk)):
+        reasons.append("ESS_bulk_missing")
+    elif float(ess_bulk) < SBC_BULK_ESS_MIN:
+        reasons.append(f"ESS_bulk={float(ess_bulk):.0f}<{SBC_BULK_ESS_MIN}")
+
+    divergences = diagnostics.get("divergences")
+    if divergences is None:
+        reasons.append("divergences_missing")
+    elif int(divergences) > SBC_DIVERGENCES_ALLOWED:
+        reasons.append(f"divergences={int(divergences)}>{SBC_DIVERGENCES_ALLOWED}")
+
+    return not reasons, reasons
+
+
+def _rank_draw_count_for_accepted_worlds(accepted: list[dict[str, Any]]) -> int:
+    if not accepted:
+        return 0
+    candidates = [int(p.get("n_draws", 0)) for p in accepted]
+    for posterior in accepted:
+        ess = (posterior.get("diagnostics") or {}).get("ess_bulk_min")
+        if ess is not None and np.isfinite(float(ess)):
+            candidates.append(int(np.floor(float(ess))))
+    return max(0, min(SBC_RANK_DRAWS_TARGET, *candidates))
+
+
+def _thin_draws(draws: np.ndarray, n_target: int) -> np.ndarray:
+    arr = np.asarray(draws)
+    if n_target <= 0:
+        raise ValueError("n_target must be positive")
+    if arr.shape[0] < n_target:
+        raise ValueError("cannot thin to more draws than are present")
+    if arr.shape[0] == n_target:
+        return arr
+    idx = np.linspace(0, arr.shape[0] - 1, n_target, dtype=int)
+    return arr[idx]
+
+
 def run_sbc(
     n_worlds: int = 200,
     prior: HyperPrior | None = None,
@@ -133,23 +249,46 @@ def run_sbc(
     """
     out_dir = out_dir or FITS_DIR / "sbc"
     out_dir.mkdir(parents=True, exist_ok=True)
-    prior = prior or HyperPrior(R=2, T=12, L=3, K=3, S=2, M=2, H=0)
+    prior = prior or HyperPrior(R=2, T=12, L=3, K=3, S=3, M=2, H=0)
 
-    parameter_ranks: dict[str, list[int]] = {}
-    n_draws_per_fit = 0
+    accepted_worlds: list[tuple[Any, dict[str, Any], int]] = []
+    discarded_worlds: list[dict[str, Any]] = []
     seeds_used = list(range(base_seed, base_seed + n_worlds))
 
     for w, seed in enumerate(seeds_used):
         world = sample_world(prior, seed=seed)
         posterior = fit_measurement_layer(world, seed=seed)
-        n_draws_per_fit = posterior["n_draws"]
-        for name, true_value in flatten_params(world.theta).items():
-            draws = posterior["draws"].get(name)
-            if draws is None:
-                continue
-            parameter_ranks.setdefault(name, []).append(
-                rank_statistic(true_value, draws)
-            )
+        accepted, reasons = _posterior_diagnostics_acceptance(posterior)
+        if not accepted:
+            discarded_worlds.append({
+                "world_index": w,
+                "seed": seed,
+                "reasons": reasons,
+                "diagnostics": posterior.get("diagnostics") or {},
+            })
+            continue
+        accepted_worlds.append((world, posterior, seed))
+
+    n_accepted = len(accepted_worlds)
+    discard_fraction = (len(discarded_worlds) / n_worlds) if n_worlds else 0.0
+    n_draws_per_fit = _rank_draw_count_for_accepted_worlds(
+        [posterior for _world, posterior, _seed in accepted_worlds]
+    )
+
+    parameter_ranks: dict[str, list[int]] = {}
+    if n_draws_per_fit >= 4:
+        for world, posterior, _seed in accepted_worlds:
+            for name, true_value in flatten_params(world.theta).items():
+                draws = posterior["draws"].get(name)
+                if draws is None:
+                    continue
+                thinned = _thin_draws(np.asarray(draws), n_draws_per_fit)
+                parameter_ranks.setdefault(name, []).append(
+                    rank_statistic(true_value, thinned)
+                )
+
+    if n_draws_per_fit < 4:
+        parameter_ranks = {}
 
     # Build per-parameter diagnostics: KS + B-6 histogram shape
     per_param: dict[str, dict] = {}
@@ -159,9 +298,39 @@ def run_sbc(
         hd  = histogram_diagnostics(arr, n_draws_per_fit)
         per_param[name] = {**ks, **hd}
 
+    convergence_failed = (
+        n_accepted == 0
+        or n_draws_per_fit < 4
+        or discard_fraction > SBC_MAX_DISCARD_FRACTION
+    )
+
+    convergence_reason = "sbc_world_convergence_screen_passed"
+    if n_accepted == 0:
+        convergence_reason = "all_sbc_worlds_discarded_by_convergence_screen"
+    elif n_draws_per_fit < 4:
+        convergence_reason = f"sbc_rank_draws_{n_draws_per_fit}_below_minimum_4"
+    elif discard_fraction > SBC_MAX_DISCARD_FRACTION:
+        convergence_reason = (
+            f"sbc_discard_fraction_{discard_fraction:.3f}_exceeds_"
+            f"{SBC_MAX_DISCARD_FRACTION}"
+        )
+
     summary: dict[str, Any] = {
         "model_version": MODEL_VERSION,
         "n_worlds": n_worlds,
+        "n_worlds_accepted": n_accepted,
+        "n_worlds_discarded": len(discarded_worlds),
+        "discard_fraction": discard_fraction,
+        "discarded_worlds": discarded_worlds,
+        "sbc_convergence_thresholds": {
+            "rhat_max": SBC_R_HAT_MAX,
+            "ess_bulk_min": SBC_BULK_ESS_MIN,
+            "divergences_allowed": SBC_DIVERGENCES_ALLOWED,
+            "max_discard_fraction": SBC_MAX_DISCARD_FRACTION,
+            "rank_draws_target": SBC_RANK_DRAWS_TARGET,
+        },
+        "sbc_convergence_screen_status": "fail" if convergence_failed else "pass",
+        "sbc_convergence_screen_reason": convergence_reason,
         "n_draws_per_fit": n_draws_per_fit,
         "ks_alpha": SBC_KS_ALPHA,
         "base_seed": base_seed,
@@ -174,15 +343,23 @@ def run_sbc(
     effective_alpha = SBC_KS_ALPHA / n_params if (SBC_BONFERRONI and n_params > 0) else SBC_KS_ALPHA
     summary["effective_alpha"] = effective_alpha
     summary["bonferroni_applied"] = SBC_BONFERRONI
-    failed = [
+    summary["ks_failed_parameters_bonferroni"] = [
         name for name, diag in per_param.items()
         if diag["pvalue"] < effective_alpha
     ]
+    gate = _sbc_gate_failures_from_diagnostics(per_param)
+    summary.update(gate)
+    failed = list(gate["failed_parameters"])
+    if convergence_failed:
+        failed = sorted(set(failed) | {"__sbc_convergence_screen__"})
     summary["failed_parameters"] = failed
     summary["gate_status"] = "pass" if not failed else "fail"
     summary["reason"] = (
-        "all_parameters_uniform" if not failed
-        else f"ks_fail_on_{len(failed)}_parameters"
+        "rank_histograms_uniform" if not failed
+        else (
+            convergence_reason if convergence_failed
+            else f"chi2_rank_histogram_fail_on_{len(failed)}_tests"
+        )
     )
     summary_path = out_dir / "sbc_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2))
@@ -222,7 +399,12 @@ def fit_measurement_layer(world, seed: int | None = None) -> dict[str, Any]:
     Uses 2 chains x 200 warmup x 200 sampling (400 draws total). The compiled
     model is cached across calls to amortize compilation cost.
     """
-    from ..model.fit import assemble_fit_data_from_synthetic, _get_compiled_model, extract_theta_space_draws
+    from ..model.fit import (
+        _safe_fit_summary,
+        assemble_fit_data_from_synthetic,
+        _get_compiled_model,
+        extract_theta_space_draws,
+    )
 
     data = assemble_fit_data_from_synthetic(world, horizon=1)
     model = _get_compiled_model()
@@ -240,4 +422,11 @@ def fit_measurement_layer(world, seed: int | None = None) -> dict[str, Any]:
 
     draws = extract_theta_space_draws(fit)
     n_draws = 2 * 200
-    return {"n_draws": n_draws, "draws": draws}
+    summary = _safe_fit_summary(fit)
+    diagnostics = {
+        "rhat_max": float(summary["R_hat"].dropna().max()),
+        "ess_bulk_min": float(summary["ESS_bulk"].dropna().min()),
+        "ess_tail_min": float(summary["ESS_tail"].dropna().min()),
+        "divergences": int(fit.method_variables()["divergent__"].sum()),
+    }
+    return {"n_draws": n_draws, "draws": draws, "diagnostics": diagnostics}
