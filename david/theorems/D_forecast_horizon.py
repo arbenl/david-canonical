@@ -302,13 +302,13 @@ def horizon_validity(
         pi_off_diag_draws = pi_off_diag_draws[np.newaxis, :, :]
         dwell_mean_draws = dwell_mean_draws[np.newaxis, :]
 
-    N_draws, R, _ = pi_off_diag_draws.shape
-    z_t_draws = _coerce_terminal_distribution(z_t_distribution, N_draws, R)
+    n_draws, n_regimes, _ = pi_off_diag_draws.shape
+    z_t_draws = _coerce_terminal_distribution(z_t_distribution, n_draws, n_regimes)
 
     rng = np.random.default_rng(seed)
     curves_per_draw = []
 
-    for i in range(N_draws):
+    for i in range(n_draws):
         pi_off_diag = pi_off_diag_draws[i]
         dwell_mean = dwell_mean_draws[i]
         z_dist = z_t_draws[i]
@@ -317,7 +317,7 @@ def horizon_validity(
         curve = []
         for h in range(1, h_max + 1):
             # marginalize over z_t under its posterior distribution
-            forecast = np.zeros(R)
+            forecast = np.zeros(n_regimes)
             for z, p in enumerate(z_dist):
                 if p < 1e-9:
                     continue

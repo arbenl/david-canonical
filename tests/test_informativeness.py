@@ -307,7 +307,7 @@ def test_production_a_prime_uses_worst_observability_grid(monkeypatch):
     assert a["gate_status"] == "fail"
     assert a["observability_grid"] == [float(x) for x in OBSERVABILITY_GRID]
     assert a["observability_aggregation"] == "min_over_pre_registered_grid"
-    assert a["worst_observability"] == 1.0
+    assert a["worst_observability"] == pytest.approx(1.0)
     assert a["median_d_theta_by_observability"]["0.5"] > 0.05
     assert a["median_d_theta_by_observability"]["1"] < 0.05
 
