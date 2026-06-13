@@ -18,7 +18,6 @@ env:
   PYTHON_VERSION: "3.11"
   NODE_VERSION: "22"
   CMDSTAN_VERSION: "2.39.0"
-  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
   SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
   SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
 
@@ -33,10 +32,10 @@ jobs:
         id: sonar-config
         shell: bash
         run: |
-          if [[ -n "$SONAR_TOKEN" && -n "$SONAR_PROJECT_KEY" && -n "$SONAR_ORGANIZATION" ]]; then
+          if [[ -n "$SONAR_PROJECT_KEY" && -n "$SONAR_ORGANIZATION" ]]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::Sonar scan skipped. Configure SONAR_TOKEN secret plus SONAR_PROJECT_KEY and SONAR_ORGANIZATION repository variables."
+            echo "::warning::Sonar scan skipped. Configure SONAR_PROJECT_KEY and SONAR_ORGANIZATION repository variables."
             echo "enabled=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -105,7 +104,7 @@ jobs:
         if: steps.sonar-config.outputs.enabled == 'true'
         uses: SonarSource/sonarqube-scan-action@v7
         env:
-          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
             -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
