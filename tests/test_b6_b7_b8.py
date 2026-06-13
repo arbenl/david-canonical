@@ -106,6 +106,18 @@ def test_bin_counts_length():
     assert len(d["bin_counts"]) == _N_BINS
 
 
+def test_histogram_uses_discrete_expected_counts_for_thinned_ranks():
+    """ESS thinning can make rank support indivisible by histogram bin count."""
+    n_draws = 45
+    ranks = np.tile(np.arange(n_draws + 1), 10)
+
+    d = histogram_diagnostics(ranks, n_draws_per_fit=n_draws)
+
+    assert d["chi_squared"] == pytest.approx(0.0)
+    assert d["chi_squared_p"] == pytest.approx(1.0)
+    assert d["histogram_shape"] == "uniform"
+
+
 def test_insufficient_data_flag():
     ranks = np.array([1, 2])  # fewer than _N_BINS
     d = histogram_diagnostics(ranks, n_draws_per_fit=400)

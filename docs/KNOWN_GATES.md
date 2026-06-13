@@ -21,7 +21,8 @@ drift > 0.02, the gate fails.
   per regime; the drift curve crosses τ = 0.50 between h = 5 and h = 6 and,
   although non-monotone beyond the crossing, never dips back below τ, so the
   first-crossing and withdrawn max-form coincide on this posterior. The
-  recorded statistic below is unchanged.)
+  recorded statistic below is unchanged. Verified again 2026-06-13 in tracker
+  B-9 after the corrected N_eff and post-audit SBC stack landed.)
 - The pipeline emits forecasts at h = 3, 6, 9, 12 months.
 - Cells at h = 6 have `forecast_route = horizon_prior_dominated` because h > h*.
 - F13 computes drift **across all emitted cells including those beyond h***.
@@ -44,6 +45,15 @@ F13: gate_status = "fail"
 The `falsification_ledger.json` records this as `gate_status: "fail"` at the
 `battery_result` level. The `route_ledger.json` records 63 cells as
 `horizon_prior_dominated`. Both are correct.
+
+### Post-A-6/B-9 calibration rerun
+On 2026-06-13, after the corrected `h*`/N_eff kernels and SBC gating updates:
+
+- Measurement SBC passed at 100 worlds on `MODEL_VERSION=m01_forward_v0.1.8`:
+  100 accepted, 0 discarded, global chi-square p = 0.3276, no BH failures.
+- Forecast SBC passed at 50 worlds: coverage_80 = 0.7939, coverage_95 = 0.9394.
+- The falsification ledger recorded `sbc_block.sbc_passed = true`; the only
+  failed required test remained F13 with statistic 0.0739 against threshold 0.02.
 
 ### When would F13 pass?
 F13 will pass once either:
